@@ -1,0 +1,214 @@
+<!DOCTYPE FTML SYSTEM "ftml.dtd">
+<FTML><HEAD><TITLE>FMF Timing for s28hs512t Parts</TITLE></HEAD>
+<BODY>
+<REVISION.HISTORY>
+version: |  author:     |  mod date: |  changes made:
+  V1.0    B.Barac         18 Apr 12    Inital Release
+  V1.1    B.Barac         19 Feb 01    Updated according rev *J
+  V1.2    B.Barac         19 Aug 09    Updated according rev *N
+
+</REVISION.HISTORY>
+<TIMESCALE>1ns</TIMESCALE>
+<MODEL>s28hs512t</MODEL>
+<FMFTIME>
+S28HS512TGABHI010_15pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+S28HS512TGABHI013_15pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+S28HS512TGABHV010_15pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+S28HS512TGABHV013_15pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+S28HS512TGABHA010_15pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+S28HS512TGABHA013_15pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+S28HS512TGABHB010_15pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+S28HS512TGABHB013_15pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+S28HS512TGABHM010_15pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+S28HS512TGABHM013_15pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+<COMMENT>The values listed are for VCC=1.7V to 2.0V, CL=15pF,Industrial and Automotive Ta=-40 to +85 Celsius</COMMENT>
+<TIMING>
+(DELAY (ABSOLUTE
+    (COND  ~OPI_IT && ~glitch  (IOPATH SCK SO  (2:2.3:6) (2:2.3:6) () (2:2.3:6) () (2:2.3:6)))
+    (COND  ~OPI_IT && ~glitch  (IOPATH SCK SI  (2:2.3:6) (2:2.3:6) () (2:2.3:6) () (2:2.3:6)))
+    (COND  ~OPI_IT && ~glitch  (IOPATH SCK IO2 (2:2.3:6) (2:2.3:6) () (2:2.3:6) () (2:2.3:6)))
+    (COND  ~OPI_IT && ~glitch  (IOPATH SCK IO3 (2:2.3:6) (2:2.3:6) () (2:2.3:6) () (2:2.3:6)))
+    (COND  ~OPI_IT && ~glitch  (IOPATH SCK IO4 (2:2.3:6) (2:2.3:6) () (2:2.3:6) () (2:2.3:6)))
+    (COND  ~OPI_IT && ~glitch  (IOPATH SCK IO5 (2:2.3:6) (2:2.3:6) () (2:2.3:6) () (2:2.3:6)))
+    (COND  ~OPI_IT && ~glitch  (IOPATH SCK IO6 (2:2.3:6) (2:2.3:6) () (2:2.3:6) () (2:2.3:6)))
+    (COND  ~OPI_IT && ~glitch  (IOPATH SCK IO7 (2:2.3:6) (2:2.3:6) () (2:2.3:6) () (2:2.3:6)))
+    
+    (COND   OPI_IT && ~glitch  (IOPATH SCK SO  (2:2.3:5.45) (2:2.3:5.45) () (2:2.3:5.45) () (2:2.3:5.45)))
+    (COND   OPI_IT && ~glitch  (IOPATH SCK SI  (2:2.3:5.45) (2:2.3:5.45) () (2:2.3:5.45) () (2:2.3:5.45)))
+    (COND   OPI_IT && ~glitch  (IOPATH SCK IO2 (2:2.3:5.45) (2:2.3:5.45) () (2:2.3:5.45) () (2:2.3:5.45)))
+    (COND   OPI_IT && ~glitch  (IOPATH SCK IO3 (2:2.3:5.45) (2:2.3:5.45) () (2:2.3:5.45) () (2:2.3:5.45)))
+    (COND   OPI_IT && ~glitch  (IOPATH SCK IO4 (2:2.3:5.45) (2:2.3:5.45) () (2:2.3:5.45) () (2:2.3:5.45)))
+    (COND   OPI_IT && ~glitch  (IOPATH SCK IO5 (2:2.3:5.45) (2:2.3:5.45) () (2:2.3:5.45) () (2:2.3:5.45)))
+    (COND   OPI_IT && ~glitch  (IOPATH SCK IO6 (2:2.3:5.45) (2:2.3:5.45) () (2:2.3:5.45) () (2:2.3:5.45)))
+    (COND   OPI_IT && ~glitch  (IOPATH SCK IO7 (2:2.3:5.45) (2:2.3:5.45) () (2:2.3:5.45) () (2:2.3:5.45)))
+
+    (IOPATH CSNeg SO  () () (2:4:6) () (2:4:6) ())
+    (IOPATH CSNeg SI  () () (2:4:6) () (2:4:6) ())
+    (IOPATH CSNeg IO2 () () (2:4:6) () (2:4:6) ())
+    (IOPATH CSNeg IO3 () () (2:4:6) () (2:4:6) ())
+    (IOPATH CSNeg IO4 () () (2:4:6) () (2:4:6) ())
+    (IOPATH CSNeg IO5 () () (2:4:6) () (2:4:6) ())
+    (IOPATH CSNeg IO6 () () (2:4:6) () (2:4:6) ())
+    (IOPATH CSNeg IO7 () () (2:4:6) () (2:4:6) ())
+    
+    (COND OPI_IT && ~glitch  (IOPATH SCK DS  (2:2.3:5.45) (2:2.3:5.45) () (2:2.3:5.45) () (2:2.3:5.45)))
+    
+    (IOPATH CSNeg DS  () () (2:4:10) (2:4:10) (2:4:10) (2:4:10))
+  ))
+(TIMINGCHECK
+    (SETUP (COND NegOPI_NegF51M CSNeg) (posedge SCK) (5))
+    (SETUP (COND NegOPI_F51M CSNeg) (posedge SCK) (4))
+    (SETUP (COND osdr CSNeg) SCK (4))
+    (SETUP (COND oddr CSNeg) SCK (4))
+
+
+    (SETUP (COND NegOPI_F51M    SI) (posedge SCK) (2))
+    (SETUP (COND NegOPI_NegF51M SI)( posedge SCK) (5))
+    (SETUP (COND odatain SI )       (posedge SCK)(0.5))
+    (SETUP (COND odatain_ddr SI)    SCK (0.5))
+
+    (SETUP RESETNeg CSNeg (50))
+
+    (HOLD (COND  ~mode3   CSNeg) SCK (4))
+    (HOLD (COND   mode3sdr CSNeg) SCK (6.5))
+    (HOLD (COND   mode3spi CSNeg) SCK (6))
+    
+    (HOLD (COND NegOPI_F51M    SI) (posedge SCK) (2))
+    (HOLD (COND NegOPI_NegF51M SI) (posedge SCK) (5))
+    (HOLD (COND odatain SI)       (posedge SCK) (0.5))
+    (HOLD (COND odatain_ddr SI)    SCK (0.5))
+
+    (HOLD CSNeg  RESETNeg (100))
+
+    (WIDTH  (COND  rd  SCK) (10))
+    (WIDTH  (COND  fast_rd    SCK) (3))
+    (WIDTH  (COND  ddrd     SCK) (2.5))
+    (WIDTH  (posedge CSNeg) (10))
+    (WIDTH  (COND  RDYBSY       (posedge CSNeg)) (20))
+    (WIDTH  (COND  prg_ers   (posedge CSNeg)) (50))
+    (WIDTH  (negedge RESETNeg)   (200))
+    (WIDTH  (posedge RESETNeg)   (50))
+
+    (PERIOD (COND rd SCK) (20))
+    (PERIOD (COND fast_rd SCK) (6))
+    (PERIOD (COND ddrd SCK) (5))
+))
+ (CELL
+  (CELLTYPE "BUFFER")
+  (INSTANCE %LABEL%/BUF_DOutZ)
+  (DELAY (ABSOLUTE (DEVICE OUT (1)))))
+ (CELL
+  (CELLTYPE "BUFFER")
+  (INSTANCE %LABEL%/BUF_DS)
+  (DELAY (ABSOLUTE (DEVICE OUT (1.5:2.3:5.45)))))
+ (CELL
+  (CELLTYPE "BUFFER")
+  (INSTANCE %LABEL%/BUF_DOut)
+  (DELAY (ABSOLUTE (DEVICE OUT (1.5:2.3:5.45)))))
+ (CELL
+  (CELLTYPE "BUFFER")
+  (INSTANCE dut/BUF_SEERC)
+  (DELAY (ABSOLUTE (DEVICE OUT (55:55:63))))
+</TIMING></FMFTIME>
+</BODY></FTML>
+<FMFTIME>
+S28HS512TGABHI010_30pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+S28HS512TGABHI013_30pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+S28HS512TGABHV010_30pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+S28HS512TGABHV013_30pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+S28HS512TGABHA010_30pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+S28HS512TGABHA013_30pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+S28HS512TGABHB010_30pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+S28HS512TGABHB013_30pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+S28HS512TGABHM010_30pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+S28HS512TGABHM013_30pF<SOURCE>Cypress Semiconductor Corporation, Document Number 002-18216 Rev. *J Revised Oct 03, 2018</SOURCE>
+<COMMENT>The values listed are for VCC=1.7V to 2.0V, CL=30pF, Industrial and Automotive Ta=-40 to +85 Celsius</COMMENT>
+<TIMING>
+(DELAY (ABSOLUTE
+    (COND  ~OPI_IT && ~glitch (IOPATH SCK SO  (2:2.3:8) (2:2.3:8) () (2:2.3:8) () (2:2.3:8)))
+    (COND  ~OPI_IT && ~glitch (IOPATH SCK SI  (2:2.3:8) (2:2.3:8) () (2:2.3:8) () (2:2.3:8)))
+    (COND  ~OPI_IT && ~glitch (IOPATH SCK IO2 (2:2.3:8) (2:2.3:8) () (2:2.3:8) () (2:2.3:8)))
+    (COND  ~OPI_IT && ~glitch (IOPATH SCK IO3 (2:2.3:8) (2:2.3:8) () (2:2.3:8) () (2:2.3:8)))
+    (COND  ~OPI_IT && ~glitch (IOPATH SCK IO4 (2:2.3:8) (2:2.3:8) () (2:2.3:8) () (2:2.3:8)))
+    (COND  ~OPI_IT && ~glitch (IOPATH SCK IO5 (2:2.3:8) (2:2.3:8) () (2:2.3:8) () (2:2.3:8)))
+    (COND  ~OPI_IT && ~glitch (IOPATH SCK IO6 (2:2.3:8) (2:2.3:8) () (2:2.3:8) () (2:2.3:8)))
+    (COND  ~OPI_IT && ~glitch (IOPATH SCK IO7 (2:2.3:8) (2:2.3:8) () (2:2.3:8) () (2:2.3:8)))
+    
+    (COND   OPI_IT && ~glitch  (IOPATH SCK SO  (2:2.3:5.45) (2:2.3:5.45) () (2:2.3:5.45) () (2:2.3:5.45)))
+    (COND   OPI_IT && ~glitch  (IOPATH SCK SI  (2:2.3:5.45) (2:2.3:5.45) () (2:2.3:5.45) () (2:2.3:5.45)))
+    (COND   OPI_IT && ~glitch  (IOPATH SCK IO2 (2:2.3:5.45) (2:2.3:5.45) () (2:2.3:5.45) () (2:2.3:5.45)))
+    (COND   OPI_IT && ~glitch  (IOPATH SCK IO3 (2:2.3:5.45) (2:2.3:5.45) () (2:2.3:5.45) () (2:2.3:5.45)))
+    (COND   OPI_IT && ~glitch  (IOPATH SCK IO4 (2:2.3:5.45) (2:2.3:5.45) () (2:2.3:5.45) () (2:2.3:5.45)))
+    (COND   OPI_IT && ~glitch  (IOPATH SCK IO5 (2:2.3:5.45) (2:2.3:5.45) () (2:2.3:5.45) () (2:2.3:5.45)))
+    (COND   OPI_IT && ~glitch  (IOPATH SCK IO6 (2:2.3:5.45) (2:2.3:5.45) () (2:2.3:5.45) () (2:2.3:5.45)))
+    (COND   OPI_IT && ~glitch  (IOPATH SCK IO7 (2:2.3:5.45) (2:2.3:5.45) () (2:2.3:5.45) () (2:2.3:5.45)))   
+
+    (IOPATH CSNeg SO  () () (2:4:6) () (2:4:6) ())
+    (IOPATH CSNeg SI  () () (2:4:6) () (2:4:6) ())
+    (IOPATH CSNeg IO2 () () (2:4:6) () (2:4:6) ())
+    (IOPATH CSNeg IO3 () () (2:4:6) () (2:4:6) ())
+    (IOPATH CSNeg IO4 () () (2:4:6) () (2:4:6) ())
+    (IOPATH CSNeg IO5 () () (2:4:6) () (2:4:6) ())
+    (IOPATH CSNeg IO6 () () (2:4:6) () (2:4:6) ())
+    (IOPATH CSNeg IO7 () () (2:4:6) () (2:4:6) ())
+    
+    (COND OPI_IT && ~glitch  (IOPATH SCK DS  (2:2.3:5.45) (2:2.3:5.45) () (2:2.3:5.45) () (2:2.3:5.45)))
+    
+    (IOPATH CSNeg DS  () () (2:4:10) (2:4:10) (2:4:10) (2:4:10))
+  ))
+(TIMINGCHECK
+    (SETUP (COND NegOPI_NegF51M CSNeg) (posedge SCK) (5))
+    (SETUP (COND NegOPI_F51M CSNeg) (posedge SCK) (4))
+    (SETUP (COND osdr CSNeg) SCK (4))
+    (SETUP (COND oddr CSNeg) SCK (4))
+
+
+    (SETUP (COND NegOPI_F51M    SI) (posedge SCK) (2))
+    (SETUP (COND NegOPI_NegF51M SI)( posedge SCK) (5))
+    (SETUP (COND odatain SI )       (posedge SCK)(0.5))
+    (SETUP (COND odatain_ddr SI)    SCK (0.5))
+
+    (SETUP RESETNeg CSNeg (50))
+
+    (HOLD (COND  ~mode3   CSNeg) SCK (4))
+    (HOLD (COND   mode3sdr CSNeg) SCK (6.5))
+    (HOLD (COND   mode3spi CSNeg) SCK (6))
+    
+    (HOLD (COND NegOPI_F51M    SI) (posedge SCK) (2))
+    (HOLD (COND NegOPI_NegF51M SI) (posedge SCK) (5))
+    (HOLD (COND odatain SI)       (posedge SCK) (0.5))
+    (HOLD (COND odatain_ddr SI)    SCK (0.5))
+
+    (HOLD CSNeg  RESETNeg (100))
+
+    (WIDTH  (COND  rd  SCK) (10))
+    (WIDTH  (COND  fast_rd    SCK) (3))
+    (WIDTH  (COND  ddrd     SCK) (2.5))
+    (WIDTH  (posedge CSNeg) (10))
+    (WIDTH  (COND  RDYBSY       (posedge CSNeg)) (20))
+    (WIDTH  (COND  prg_ers   (posedge CSNeg)) (50))
+    (WIDTH  (negedge RESETNeg)   (200))
+    (WIDTH  (posedge RESETNeg)   (50))
+
+    (PERIOD (COND rd SCK) (20))
+    (PERIOD (COND fast_rd SCK) (6))
+    (PERIOD (COND ddrd SCK) (5))
+))
+ (CELL
+  (CELLTYPE "BUFFER")
+  (INSTANCE %LABEL%/BUF_DOutZ)
+  (DELAY (ABSOLUTE (DEVICE OUT (1)))))
+ (CELL
+  (CELLTYPE "BUFFER")
+  (INSTANCE %LABEL%/BUF_DS)
+  (DELAY (ABSOLUTE (DEVICE OUT (1.5:2.3:5.45)))))
+ (CELL
+  (CELLTYPE "BUFFER")
+  (INSTANCE %LABEL%/BUF_DOut)
+  (DELAY (ABSOLUTE (DEVICE OUT (1.5:2.3:5.45)))))
+ (CELL
+  (CELLTYPE "BUFFER")
+  (INSTANCE dut/BUF_SEERC)
+  (DELAY (ABSOLUTE (DEVICE OUT (55:55:63))))
+</TIMING></FMFTIME>
+</BODY></FTML>

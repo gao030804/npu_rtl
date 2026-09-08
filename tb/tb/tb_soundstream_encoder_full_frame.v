@@ -1,0 +1,530 @@
+`timescale 1ns/1ps
+
+//=============================================================================
+// 一帧PCM16 -> 31个物理卷积 -> 1x64 INT8 latent 的完整自检。
+//
+// 数值检查：每次Activation写回均与Python整数golden逐byte比较。
+// 性能检查：记录每层卷积周期、下一层权重预取周期以及预取等待周期。
+//=============================================================================
+module tb_soundstream_encoder_full_frame;
+
+localparam [31:0] BUFFER_A_BASE = 32'h0000_1000;
+localparam [31:0] BUFFER_B_BASE = 32'h0000_3000;
+localparam integer CLOCK_PERIOD_NS = 10;
+localparam integer MAX_TEST_CYCLES = 50000000;
+localparam integer GOLDEN_BYTES = 31 * 8192;
+`ifdef FULL_ENCODER_REAL_SPI
+localparam integer USE_REAL_SPI = 1;
+`else
+localparam integer USE_REAL_SPI = 0;
+`endif
+`ifdef FULL_ENCODER_ONCHIP_ONLY
+localparam integer ONCHIP_ONLY = 1;
+`else
+localparam integer ONCHIP_ONLY = 0;
+`endif
+
+reg clk, rst_n;
+reg encoder_start;
+wire encoder_start_ready, encoder_busy, encoder_done, encoder_error;
+
+wire input_wr_valid, input_wr_ready;
+wire [31:0] input_wr_addr;
+wire [63:0] input_wr_data;
+wire [7:0] input_wr_strb;
+wire input_buffer_select;
+wire [31:0] input_buffer_base;
+
+wire layer_prepare_valid;
+reg layer_prepare_ready;
+wire [5:0] physical_layer, logical_layer;
+reg elu_lut_cfg_valid;
+wire elu_lut_cfg_ready;
+reg [6:0] elu_lut_cfg_addr;
+reg [7:0] elu_lut_cfg_wdata;
+
+wire param_rd_req_valid;
+reg param_rd_req_ready;
+wire [5:0] param_rd_layer;
+wire [5:0] param_rd_output_group;
+reg param_rd_rsp_valid;
+wire param_rd_rsp_ready;
+reg [255:0] param_bias_data, param_mult_data;
+reg [47:0] param_shift_data;
+reg [63:0] param_zero_point_data;
+
+wire layer_write_fire;
+wire [31:0] layer_write_addr;
+wire [63:0] layer_write_data;
+wire [7:0] layer_write_strb;
+wire perf_engine_start, perf_engine_done;
+wire perf_weight_sram_read_fire;
+wire perf_weight_prefetch_fire, perf_weight_prefetch_done;
+wire [23:0] perf_weight_prefetch_base;
+wire [15:0] perf_weight_prefetch_blocks;
+
+wire flash_csn, flash_sclk, flash_mosi, flash_miso;
+tri1 flash_wpn, flash_holdn;
+
+// PCM frontend
+reg pcm_frontend_start;
+wire pcm_frontend_busy, pcm_frontend_done;
+reg pcm_valid;
+wire pcm_ready;
+reg signed [15:0] pcm_data;
+reg [15:0] pcm_memory [0:319];
+integer pcm_index;
+
+// Golden memories
+reg [7:0] elu_lut [0:127];
+reg [7:0] golden_layers [0:GOLDEN_BYTES-1];
+
+integer cycle_count;
+integer frame_start_cycle;
+integer encoder_start_cycle;
+integer encoder_done_cycle;
+integer boot_weight_done_cycle;
+integer errors;
+integer compare_count;
+integer pcm_compare_count;
+integer timeout_count;
+integer lane;
+integer layer;
+integer offset;
+integer golden_index;
+integer timing_file;
+integer expected_output_bytes [0:30];
+integer actual_output_bytes [0:30];
+integer compute_start_cycle [0:30];
+integer compute_done_cycle [0:30];
+integer first_weight_read_cycle [0:30];
+integer weight_sram_read_count [0:30];
+integer prefetch_start_cycle [0:30];
+integer prefetch_done_cycle [0:30];
+integer prefetch_blocks [0:30];
+integer prefetch_pending_layer;
+integer expected_base;
+integer transfer_cycles;
+integer compute_cycles;
+integer slack_cycles;
+integer wait_cycles;
+integer layer_start_errors [0:30];
+integer sum_compute_cycles;
+integer control_overhead_cycles;
+
+soundstream_encoder_top #(
+    .BUFFER_A_BASE(BUFFER_A_BASE),
+    .BUFFER_B_BASE(BUFFER_B_BASE),
+    .FLASH_SPI_DIVIDER(16'd1),
+    .FAST_SIM_WEIGHT_CACHE(USE_REAL_SPI ? 0 : 1)
+) u_dut (
+    .clk(clk),.rst_n(rst_n),.start(encoder_start),
+    .start_ready(encoder_start_ready),.busy(encoder_busy),
+    .done(encoder_done),.error(encoder_error),
+    .input_wr_valid(input_wr_valid),.input_wr_ready(input_wr_ready),
+    .input_wr_addr(input_wr_addr),.input_wr_data(input_wr_data),
+    .input_wr_strb(input_wr_strb),.input_buffer_select(input_buffer_select),
+    .input_buffer_base(input_buffer_base),
+    .layer_prepare_valid(layer_prepare_valid),.layer_prepare_ready(layer_prepare_ready),
+    .physical_layer(physical_layer),.logical_layer(logical_layer),
+    .elu_lut_cfg_valid(elu_lut_cfg_valid),.elu_lut_cfg_ready(elu_lut_cfg_ready),
+    .elu_lut_cfg_addr(elu_lut_cfg_addr),.elu_lut_cfg_wdata(elu_lut_cfg_wdata),
+    .param_rd_req_valid(param_rd_req_valid),.param_rd_req_ready(param_rd_req_ready),
+    .param_rd_layer(param_rd_layer),.param_rd_output_group(param_rd_output_group),
+    .param_rd_rsp_valid(param_rd_rsp_valid),.param_rd_rsp_ready(param_rd_rsp_ready),
+    .param_bias_data(param_bias_data),.param_mult_data(param_mult_data),
+    .param_shift_data(param_shift_data),.param_zero_point_data(param_zero_point_data),
+    .result_rd_req_valid(1'b0),.result_rd_req_ready(),
+    .result_rd_addr0(32'd0),.result_rd_addr1(32'd0),
+    .result_rd_addr2(32'd0),.result_rd_addr3(32'd0),.result_rd_mask(4'd0),
+    .result_rd_rsp_valid(),.result_rd_rsp_ready(1'b1),.result_rd_data(),
+    .result_buffer_select(),.result_buffer_base(),
+    .layer_write_fire(layer_write_fire),.layer_write_addr(layer_write_addr),
+    .layer_write_data(layer_write_data),.layer_write_strb(layer_write_strb),
+    .perf_engine_start(perf_engine_start),.perf_engine_done(perf_engine_done),
+    .perf_weight_sram_read_fire(perf_weight_sram_read_fire),
+    .perf_weight_prefetch_fire(perf_weight_prefetch_fire),
+    .perf_weight_prefetch_done(perf_weight_prefetch_done),
+    .perf_weight_prefetch_base(perf_weight_prefetch_base),
+    .perf_weight_prefetch_blocks(perf_weight_prefetch_blocks),
+    .flash_csn(flash_csn),.flash_sclk(flash_sclk),
+    .flash_mosi(flash_mosi),.flash_miso(flash_miso)
+);
+
+pcm16_input_frontend u_pcm_frontend (
+    .clk(clk),.rst_n(rst_n),.start(pcm_frontend_start),
+    .cfg_output_base(BUFFER_A_BASE),.cfg_sample_count(16'd320),
+    .cfg_multiplier(32'sd1),.cfg_shift(6'd8),.cfg_zero_point(8'sd0),
+    .busy(pcm_frontend_busy),.done(pcm_frontend_done),
+    .pcm_valid(pcm_valid),.pcm_ready(pcm_ready),.pcm_data(pcm_data),
+    .wr_valid(input_wr_valid),.wr_ready(input_wr_ready),
+    .wr_addr(input_wr_addr),.wr_data(input_wr_data),.wr_strb(input_wr_strb)
+);
+
+generate
+if (USE_REAL_SPI) begin : g_real_flash
+W25Q128JVxIM u_flash (
+    .CSn(flash_csn),.CLK(flash_sclk),.DIO(flash_mosi),.DO(flash_miso),
+    .WPn(flash_wpn),.HOLDn(flash_holdn)
+);
+end else begin : g_no_bit_level_flash
+    assign flash_miso = 1'b1;
+end
+endgenerate
+
+always #5 clk = ~clk;
+
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n)
+        cycle_count <= 0;
+    else
+        cycle_count <= cycle_count + 1;
+end
+
+// 连续送入320个PCM样本；只在valid/ready握手时前进。
+always @(*) begin
+    pcm_valid = pcm_frontend_busy && (pcm_index < 320);
+    pcm_data = (pcm_index < 320) ? pcm_memory[pcm_index] : 16'sd0;
+end
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n)
+        pcm_index <= 0;
+    else if (pcm_valid && pcm_ready)
+        pcm_index <= pcm_index + 1;
+end
+
+// Parameter Memory：本测试采用bias=0、mult=1、shift=0、zero_point=0。
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        param_rd_req_ready <= 1'b1;
+        param_rd_rsp_valid <= 1'b0;
+        param_bias_data <= 256'd0;
+        param_mult_data <= {8{32'd1}};
+        param_shift_data <= 48'd0;
+        param_zero_point_data <= 64'd0;
+    end else begin
+        if (param_rd_rsp_valid && param_rd_rsp_ready) begin
+            param_rd_rsp_valid <= 1'b0;
+            param_rd_req_ready <= 1'b1;
+        end
+        if (param_rd_req_valid && param_rd_req_ready) begin
+            param_rd_req_ready <= 1'b0;
+            param_rd_rsp_valid <= 1'b1;
+        end
+    end
+end
+
+// 检查PCM量化及64-bit打包结果。
+always @(posedge clk) begin
+    if (rst_n && input_wr_valid && input_wr_ready) begin
+        offset = input_wr_addr - BUFFER_A_BASE;
+        for (lane=0; lane<8; lane=lane+1) begin
+            if (input_wr_strb[lane]) begin
+                if (input_wr_data[8*lane +: 8] !== pcm_memory[offset+lane][15:8]) begin
+                    $display("[ERROR] PCM quant offset=%0d expected=%02h actual=%02h",
+                             offset+lane,pcm_memory[offset+lane][15:8],
+                             input_wr_data[8*lane +: 8]);
+                    errors = errors + 1;
+                end
+                pcm_compare_count = pcm_compare_count + 1;
+            end
+        end
+    end
+end
+
+// 逐层、逐byte比较所有写回值。
+always @(posedge clk) begin
+    if (rst_n && layer_write_fire) begin
+        expected_base = physical_layer[0] ? BUFFER_A_BASE : BUFFER_B_BASE;
+        offset = layer_write_addr - expected_base;
+        if ((offset < 0) || (offset >= 8192)) begin
+            $display("[ERROR] layer=%0d output address out of range: %h",
+                     physical_layer,layer_write_addr);
+            errors = errors + 1;
+        end else begin
+            for (lane=0; lane<8; lane=lane+1) begin
+                if (layer_write_strb[lane]) begin
+                    golden_index = physical_layer * 8192 + offset + lane;
+                    if (layer_write_data[8*lane +: 8] !== golden_layers[golden_index]) begin
+                        if (errors < 50)
+                            $display("[ERROR] layer=%0d byte=%0d expected=%02h actual=%02h",
+                                     physical_layer,offset+lane,golden_layers[golden_index],
+                                     layer_write_data[8*lane +: 8]);
+                        errors = errors + 1;
+                    end
+                    actual_output_bytes[physical_layer] =
+                        actual_output_bytes[physical_layer] + 1;
+                    compare_count = compare_count + 1;
+                end
+            end
+        end
+    end
+end
+
+// 真实DUT事件的周期统计。
+always @(posedge clk) begin
+    if (rst_n) begin
+        if (u_dut.first_weight_ready && (boot_weight_done_cycle < 0))
+            boot_weight_done_cycle = cycle_count;
+
+        if (perf_engine_start) begin
+            $display("[PROGRESS] layer=%0d engine_start cycle=%0d",
+                     physical_layer,cycle_count);
+            compute_start_cycle[physical_layer] = cycle_count;
+            expected_output_bytes[physical_layer] =
+                u_dut.cfg_cout * u_dut.cfg_output_length;
+            layer_start_errors[physical_layer] = errors;
+        end
+        if (perf_engine_done) begin
+            compute_done_cycle[physical_layer] = cycle_count;
+            $display("[PROGRESS] layer=%0d engine_done cycle=%0d comparisons=%0d",
+                     physical_layer,cycle_count,compare_count);
+            if ((errors == layer_start_errors[physical_layer]) &&
+                (actual_output_bytes[physical_layer] ==
+                 expected_output_bytes[physical_layer]) &&
+                (weight_sram_read_count[physical_layer] ==
+                 ((physical_layer==0) ? 4 : prefetch_blocks[physical_layer])))
+                $display("[LAYER_PASS] physical=%0d logical=%0d weight_reads=%0d bytes=%0d cycles=%0d",
+                         physical_layer,logical_layer,
+                         weight_sram_read_count[physical_layer],
+                         actual_output_bytes[physical_layer],
+                         cycle_count-compute_start_cycle[physical_layer]);
+            else
+                $display("[LAYER_FAIL] physical=%0d logical=%0d expected_reads=%0d actual_reads=%0d expected_bytes=%0d actual_bytes=%0d new_errors=%0d",
+                         physical_layer,logical_layer,
+                         (physical_layer==0) ? 4 : prefetch_blocks[physical_layer],
+                         weight_sram_read_count[physical_layer],
+                         expected_output_bytes[physical_layer],
+                         actual_output_bytes[physical_layer],
+                         errors-layer_start_errors[physical_layer]);
+        end
+
+        if (perf_weight_sram_read_fire) begin
+            if (weight_sram_read_count[physical_layer] == 0)
+                first_weight_read_cycle[physical_layer] = cycle_count;
+            weight_sram_read_count[physical_layer] =
+                weight_sram_read_count[physical_layer] + 1;
+        end
+
+        if (perf_weight_prefetch_fire) begin
+            prefetch_pending_layer = physical_layer + 1;
+            prefetch_start_cycle[prefetch_pending_layer] = cycle_count;
+            prefetch_blocks[prefetch_pending_layer] = perf_weight_prefetch_blocks;
+            $display("[PROGRESS] prefetch layer=%0d blocks=%0d start_cycle=%0d mode=%s",
+                     prefetch_pending_layer,perf_weight_prefetch_blocks,cycle_count,
+                     USE_REAL_SPI ? "REAL_SPI" :
+                     (ONCHIP_ONLY ? "SRAM_PRELOAD" : "FAST_MODEL"));
+        end
+        if (perf_weight_prefetch_done && (prefetch_pending_layer > 0)) begin
+            prefetch_done_cycle[prefetch_pending_layer] = cycle_count;
+            $display("[PROGRESS] prefetch layer=%0d done_cycle=%0d",
+                     prefetch_pending_layer,cycle_count);
+            prefetch_pending_layer = -1;
+        end
+    end
+end
+
+task load_elu_lut;
+    integer index;
+    begin
+        for (index=0; index<128; index=index+1) begin
+            @(negedge clk);
+            elu_lut_cfg_addr = index[6:0];
+            elu_lut_cfg_wdata = elu_lut[index];
+            elu_lut_cfg_valid = 1'b1;
+            while (!elu_lut_cfg_ready)
+                @(negedge clk);
+            @(posedge clk);
+            @(negedge clk);
+            elu_lut_cfg_valid = 1'b0;
+        end
+    end
+endtask
+
+task print_timing_report;
+    begin
+        if (ONCHIP_ONLY) begin
+            timing_file = $fopen("logs/full_encoder_onchip_timing.csv", "w");
+            $fwrite(timing_file,
+                    "physical,logical,expected_weight_blocks,sram_read_blocks,output_bytes,engine_cycles,sram_to_done_cycles,sram_to_done_time_ns\n");
+            sum_compute_cycles = 0;
+            $display("[TIMING] on-chip Weight SRAM -> Mesh -> writeback");
+            $display("[TIMING] physical logical blocks reads bytes engine_cycles sram_to_done_cycles time_ns");
+            for (layer=0; layer<31; layer=layer+1) begin
+                compute_cycles = compute_done_cycle[layer] - compute_start_cycle[layer];
+                sum_compute_cycles = sum_compute_cycles + compute_cycles;
+                transfer_cycles = compute_done_cycle[layer] -
+                                  first_weight_read_cycle[layer];
+                $display("[TIMING] %0d %0d %0d %0d %0d %0d %0d %0d",
+                         layer,(layer < 29) ? layer+1 : ((layer < 30) ? 29 : 30),
+                         (layer==0) ? 4 : prefetch_blocks[layer],
+                         weight_sram_read_count[layer],actual_output_bytes[layer],
+                         compute_cycles,transfer_cycles,
+                         transfer_cycles*CLOCK_PERIOD_NS);
+                $fwrite(timing_file,"%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d\n",
+                        layer,(layer < 29) ? layer+1 : ((layer < 30) ? 29 : 30),
+                         (layer==0) ? 4 : prefetch_blocks[layer],
+                        weight_sram_read_count[layer],actual_output_bytes[layer],
+                        compute_cycles,transfer_cycles,
+                        transfer_cycles*CLOCK_PERIOD_NS);
+            end
+            control_overhead_cycles = (encoder_done_cycle-encoder_start_cycle) -
+                                      sum_compute_cycles;
+            $display("[SUMMARY] layer_compute_sum=%0d cycles (%0d ns)",
+                     sum_compute_cycles,sum_compute_cycles*CLOCK_PERIOD_NS);
+            $display("[SUMMARY] residual/config/bank-switch overhead=%0d cycles (%0d ns)",
+                     control_overhead_cycles,
+                     control_overhead_cycles*CLOCK_PERIOD_NS);
+            $display("[SUMMARY] encoder_start_to_done=%0d cycles (%0d ns)",
+                     encoder_done_cycle-encoder_start_cycle,
+                     (encoder_done_cycle-encoder_start_cycle)*CLOCK_PERIOD_NS);
+            $display("[SUMMARY] PCM_start_to_encoder_done=%0d cycles (%0d ns)",
+                     encoder_done_cycle-frame_start_cycle,
+                     (encoder_done_cycle-frame_start_cycle)*CLOCK_PERIOD_NS);
+        end else begin
+            timing_file = $fopen("logs/full_encoder_timing.csv", "w");
+            $fwrite(timing_file,
+                "physical,logical,blocks,transfer_cycles,compute_cycles,slack_cycles,wait_cycles,hidden\n");
+        $display("[TIMING] layer blocks transfer compute slack wait hidden");
+        for (layer=0; layer<31; layer=layer+1) begin
+            compute_cycles = compute_done_cycle[layer] - compute_start_cycle[layer];
+            if (layer == 0) begin
+                if (USE_REAL_SPI)
+                    transfer_cycles = boot_weight_done_cycle - frame_start_cycle;
+                else
+                    transfer_cycles = 4096; // 4 blocks x 1024 cycles/block
+                slack_cycles = 0;
+                wait_cycles = 0;
+                $display("[TIMING] %0d 4 %0d %0d N/A N/A boot",
+                         layer,transfer_cycles,compute_cycles);
+                $fwrite(timing_file,"0,1,4,%0d,%0d,0,0,boot\n",
+                        transfer_cycles,compute_cycles);
+            end else begin
+                if (USE_REAL_SPI)
+                    transfer_cycles = prefetch_done_cycle[layer] -
+                                      prefetch_start_cycle[layer];
+                else
+                    // 25 MHz单线SPI：每个256-bit block至少需要1024个100 MHz周期。
+                    transfer_cycles = prefetch_blocks[layer] * 1024;
+                slack_cycles = (compute_done_cycle[layer-1] -
+                                compute_start_cycle[layer-1]) - transfer_cycles;
+                wait_cycles = (slack_cycles < 0) ? -slack_cycles : 0;
+                $display("[TIMING] %0d %0d %0d %0d %0d %0d %s",
+                         layer,prefetch_blocks[layer],transfer_cycles,compute_cycles,
+                         slack_cycles,wait_cycles,(slack_cycles >= 0) ? "YES" : "NO");
+                $fwrite(timing_file,"%0d,%0d,%0d,%0d,%0d,%0d,%0d,%s\n",
+                        layer,(layer < 29) ? layer+1 : ((layer < 30) ? 29 : 30),
+                        prefetch_blocks[layer],transfer_cycles,compute_cycles,
+                        slack_cycles,wait_cycles,(slack_cycles >= 0) ? "yes" : "no");
+            end
+        end
+            $display("[TIMING] PCM-start to encoder-done: %0d cycles = %0d ns",
+                 encoder_done_cycle-frame_start_cycle,
+                 (encoder_done_cycle-frame_start_cycle)*CLOCK_PERIOD_NS);
+        $display("[TIMING] encoder-start to encoder-done: %0d cycles = %0d ns",
+                 encoder_done_cycle-encoder_start_cycle,
+                 (encoder_done_cycle-encoder_start_cycle)*CLOCK_PERIOD_NS);
+        end
+        $fclose(timing_file);
+    end
+endtask
+
+initial begin
+    clk=0; rst_n=0; encoder_start=0; pcm_frontend_start=0;
+    layer_prepare_ready=1;
+    elu_lut_cfg_valid=0; elu_lut_cfg_addr=0; elu_lut_cfg_wdata=0;
+    pcm_index=0; cycle_count=0; errors=0; compare_count=0; pcm_compare_count=0;
+    frame_start_cycle=-1; encoder_start_cycle=-1; encoder_done_cycle=-1;
+    boot_weight_done_cycle=-1; prefetch_pending_layer=-1;
+    for (layer=0; layer<31; layer=layer+1) begin
+        expected_output_bytes[layer]=0; actual_output_bytes[layer]=0;
+        compute_start_cycle[layer]=-1; compute_done_cycle[layer]=-1;
+        prefetch_start_cycle[layer]=-1; prefetch_done_cycle[layer]=-1;
+        prefetch_blocks[layer]=0;
+        layer_start_errors[layer]=0;
+        first_weight_read_cycle[layer]=-1;
+        weight_sram_read_count[layer]=0;
+    end
+
+    $readmemh("tb/data/full_encoder/pcm_frame.hex", pcm_memory);
+    $readmemh("tb/data/elu_lut_s1_32.hex", elu_lut);
+    $readmemh("tb/data/full_encoder/golden_layers.mem", golden_layers);
+
+    repeat (8) @(posedge clk);
+    rst_n=1;
+    @(negedge clk);
+    frame_start_cycle=cycle_count;
+    pcm_frontend_start=1;
+    @(posedge clk);
+    @(negedge clk);
+    pcm_frontend_start=0;
+
+    timeout_count=0;
+    while (!pcm_frontend_done && timeout_count<10000) begin
+        @(posedge clk);
+        timeout_count=timeout_count+1;
+    end
+    if (!pcm_frontend_done) begin
+        $display("[TB_FAIL] PCM frontend timeout");
+        $finish;
+    end
+    if (pcm_compare_count != 320) begin
+        $display("[ERROR] PCM comparisons expected=320 actual=%0d",pcm_compare_count);
+        errors=errors+1;
+    end
+
+    load_elu_lut;
+
+    timeout_count=0;
+    while (!encoder_start_ready && timeout_count<1000000) begin
+        @(posedge clk);
+        timeout_count=timeout_count+1;
+    end
+    if (!encoder_start_ready) begin
+        $display("[TB_FAIL] first-layer weight boot timeout");
+        $finish;
+    end
+    @(negedge clk);
+    encoder_start_cycle=cycle_count;
+    encoder_start=1;
+    @(posedge clk);
+    @(negedge clk);
+    encoder_start=0;
+
+    timeout_count=0;
+    while (!encoder_done && timeout_count<MAX_TEST_CYCLES) begin
+        @(posedge clk);
+        timeout_count=timeout_count+1;
+    end
+    encoder_done_cycle=cycle_count;
+    if (!encoder_done) begin
+        $display("[TB_FAIL] full encoder timeout cycles=%0d",timeout_count);
+        $finish;
+    end
+
+    for (layer=0; layer<31; layer=layer+1) begin
+        if (actual_output_bytes[layer] != expected_output_bytes[layer]) begin
+            $display("[ERROR] layer=%0d output count expected=%0d actual=%0d",
+                     layer,expected_output_bytes[layer],actual_output_bytes[layer]);
+            errors=errors+1;
+        end
+    end
+    print_timing_report;
+
+    if (encoder_error) begin
+        $display("[ERROR] encoder_error asserted");
+        errors=errors+1;
+    end
+    if (compare_count != 97344) begin
+        $display("[ERROR] activation comparisons expected=97344 actual=%0d",compare_count);
+        errors=errors+1;
+    end
+
+    if (errors==0)
+        $display("[TB_PASS] PCM16 + 31 physical convolutions + 97344 activation bytes + final 1x64 latent correct");
+    else
+        $display("[TB_FAIL] errors=%0d comparisons=%0d",errors,compare_count);
+    $finish;
+end
+
+endmodule

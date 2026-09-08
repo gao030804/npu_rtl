@@ -1,0 +1,91 @@
+// ============================================================================
+// 中文阅读导引（当前实现）
+// PCM前端量化：将signed 16-bit采样按配置缩放、舍入并饱和到signed INT8。
+// 缩放参数决定真实PCM幅度与整数激活的对应关系，需要与训练/整数参考模型一致。
+// ============================================================================
+//=============================================================================
+// 模块：pcm16_to_int8_quantizer
+// 功能：把 signed PCM16 样本重新量化为 signed INT8 激活值。
+//
+// 公式：q = sat_int8(round(pcm * multiplier / 2^shift) + zero_point)
+// multiplier、shift 和 zero_point 必须来自模型导出或离线校准。
+//=============================================================================
+
+// -------------------------------------------------------------------------
+// 详细阅读说明：
+// - 定点公式为q=sat8(round_half_away_from_zero(pcm*multiplier/2^shift)+zero_point)。
+// - 乘法与舍入使用64-bit signed中间值，避免PCM16乘INT32时提前溢出。
+// - 输出范围为signed INT8 [-128,127]，量化参数必须与训练导出参数一致。
+// -------------------------------------------------------------------------
+module pcm16_to_int8_quantizer (
+    input                                       clk,
+    input                                       rst_n,
+    input                                       in_valid,
+    output                                      in_ready,
+    input       signed [15:0]                   in_pcm,
+    input                                       in_last,
+    input       signed [31:0]                   cfg_multiplier,
+    input              [5:0]                    cfg_shift,
+    input       signed [7:0]                    cfg_zero_point,
+    output reg                                  out_valid,
+    input                                       out_ready,
+    output reg  signed [7:0]                    out_data,
+    output reg                                  out_last
+);
+
+reg signed [63:0] pcm_ext;
+reg signed [63:0] mult_ext;
+reg signed [63:0] scaled;
+reg signed [63:0] magnitude;
+reg signed [63:0] rounded;
+reg signed [63:0] shifted;
+reg signed [63:0] requantized;
+reg signed [7:0]  quantized;
+assign in_ready = !out_valid || out_ready;
+
+always @(*) begin
+    pcm_ext     = {{48{in_pcm[15]}}, in_pcm};
+    mult_ext    = {{32{cfg_multiplier[31]}}, cfg_multiplier};
+    scaled      = $signed(pcm_ext) * $signed(mult_ext);
+    magnitude   = 64'sd0;
+    rounded     = 64'sd0;
+    shifted     = 64'sd0;
+    requantized = 64'sd0;
+    quantized   = 8'sd0;
+
+    // 对称舍入。负数按绝对值舍入后恢复符号，避免算术右移偏向负无穷。
+    if (cfg_shift == 0) begin
+        shifted = scaled;
+    end else if (scaled >= 0) begin
+        rounded = scaled + (64'sd1 << (cfg_shift - 1'b1));
+        shifted = rounded >>> cfg_shift;
+    end else begin
+        magnitude = -scaled;
+        rounded   = magnitude + (64'sd1 << (cfg_shift - 1'b1));
+        shifted   = -(rounded >>> cfg_shift);
+    end
+    requantized = shifted + {{56{cfg_zero_point[7]}}, cfg_zero_point};
+    if (requantized > 64'sd127) begin
+        quantized = 8'sd127;
+    end else if (requantized < -64'sd128) begin
+        quantized = -8'sd128;
+    end else begin
+        quantized = requantized[7:0];
+    end
+end
+
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        out_valid <= 1'b0;
+        out_data  <= 8'sd0;
+        out_last  <= 1'b0;
+    end else if (in_ready) begin
+        out_valid <= in_valid;
+        if (in_valid) begin
+            out_data <= quantized;
+            out_last <= in_last;
+        end
+    end
+end
+
+endmodule
