@@ -192,7 +192,8 @@ reg [47:0] shift_q;
 reg [63:0] zero_point_q;
 
 // 配置合法性检查：除基本非零/范围检查外，还核对软件提供的派生量。
-wire cin_ok = (cin == 9'd1)   || (cin == 9'd16) ||
+wire cin_ok = (cin == 9'd1)   || (cin == 9'd8)  ||
+    (cin == 9'd16) ||
     (cin == 9'd32)  || (cin == 9'd64) ||
     (cin == 9'd128) || (cin == 9'd256);
 wire [13:0] calc_k_total  = {5'd0, cin} * {9'd0, kernel};

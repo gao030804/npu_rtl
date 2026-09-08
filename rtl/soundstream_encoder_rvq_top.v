@@ -193,7 +193,8 @@ pcm16_input_frontend #(
     .rst_n                       (rst_n),
     .start                       (pcm_start),
     .cfg_output_base             (input_buffer_base),
-    .cfg_sample_count            (PCM_SAMPLES_PER_FRAME),
+    // 前端计数器接口固定为16 bit；显式截取可避免工具把integer参数按32 bit连接。
+    .cfg_sample_count            (PCM_SAMPLES_PER_FRAME[15:0]),
     .cfg_multiplier              (pcm_multiplier),
     .cfg_shift                   (pcm_shift),
     .cfg_zero_point              (pcm_zero_point),

@@ -61,6 +61,7 @@ always @(*) begin
     cin_valid = 1'b1;
     case (cin)
         9'd1:   cin_shift = 4'd0;
+        9'd8:   cin_shift = 4'd3;
         9'd16:  cin_shift = 4'd4;
         9'd32:  cin_shift = 4'd5;
         9'd64:  cin_shift = 4'd6;

@@ -41,7 +41,11 @@ integer byte_index;
 integer block_index;
 
 initial begin
+`ifdef FULL_ENCODER_RVQ_TEST
+    $readmemh("tb/data/full_encoder_rvq/weights.mem", memory);
+`else
     $readmemh("tb/data/full_encoder/weights.mem", memory);
+`endif
     // 第一层128 Byte权重直接预装到常驻SRAM。
     for (block_index=0; block_index<4; block_index=block_index+1)
         for (byte_index=0; byte_index<32; byte_index=byte_index+1)
