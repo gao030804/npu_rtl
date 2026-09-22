@@ -8,6 +8,12 @@
 // SRAM/FIFO宏替换本模块，但valid/ready接口保持不变。
 //=============================================================================
 
+// [中文注释-自动补充]
+// 模块作用：Octal DDR跨时钟FIFO。
+// 关键变量/接口：写侧与读侧使用Gray指针同步；full/empty阻止溢出和下溢。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module octal_ddr_async_fifo #(
     parameter DATA_WIDTH = 18,
     parameter ADDR_WIDTH = 5
@@ -40,10 +46,13 @@ wire fifo_full = (wr_gray_next ==
     {~rd_gray_sync2[ADDR_WIDTH:ADDR_WIDTH-1],
     rd_gray_sync2[ADDR_WIDTH-2:0]});
 wire fifo_empty = (rd_gray == wr_gray_sync2);
+// 连续赋值：组合生成wr_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign wr_ready = !fifo_full;
 assign rd_valid = !fifo_empty;
+// 连续赋值：组合生成rd_data及其相邻接口信号，表达握手、选择或地址关系。
 assign rd_data  = mem[rd_bin[ADDR_WIDTH-1:0]];
 
+// 时序逻辑：在时钟沿更新wr_bin、wr_gray、rd_bin、rd_gray、rd_gray_sync1、rd_gray_sync2；复位分支负责恢复确定的空闲状态。
 always @(posedge wr_clk or negedge wr_rst_n) begin
     if (!wr_rst_n) begin
         wr_bin  <= 0;
@@ -56,6 +65,7 @@ always @(posedge wr_clk or negedge wr_rst_n) begin
     end
 end
 
+// 时序逻辑：在时钟沿更新rd_bin、rd_gray、rd_gray_sync1、rd_gray_sync2、wr_gray_sync1、wr_gray_sync2；复位分支负责恢复确定的空闲状态。
 always @(posedge rd_clk or negedge rd_rst_n) begin
     if (!rd_rst_n) begin
         rd_bin  <= 0;
@@ -68,6 +78,7 @@ end
 
 // Gray指针各经过两级同步器进入对方时钟域。
 
+// 时序逻辑：在时钟沿更新rd_gray_sync1、rd_gray_sync2、wr_gray_sync1、wr_gray_sync2；复位分支负责恢复确定的空闲状态。
 always @(posedge wr_clk or negedge wr_rst_n) begin
     if (!wr_rst_n) begin
         rd_gray_sync1 <= 0;
@@ -78,6 +89,7 @@ always @(posedge wr_clk or negedge wr_rst_n) begin
     end
 end
 
+// 时序逻辑：在时钟沿更新wr_gray_sync1、wr_gray_sync2；复位分支负责恢复确定的空闲状态。
 always @(posedge rd_clk or negedge rd_rst_n) begin
     if (!rd_rst_n) begin
         wr_gray_sync1 <= 0;

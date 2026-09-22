@@ -22,6 +22,12 @@
 // - XOUT把激活传给右侧PE，PEOUT把新部分和传给下一行；ce=0时全部寄存器保持。
 // - 本模块只计算一个k_group内的部分和，跨k_group的INT32累加由accumulator_8lane完成。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：权重固定脉动阵列处理单元。
+// 关键变量/接口：XIN/XOUT横向传激活；PEIN/PEOUT纵向传INT20部分和；W为本PE固定INT8权重。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module PE #(
     parameter DATA_WIDTH = 8,
     parameter ACC_WIDTH  = 20
@@ -45,6 +51,7 @@ wire signed [ACC_WIDTH-1:0] product_ext =
 
 // PE内所有数据均为时序输出。CE是整条Mesh的统一流水使能；CE为0时，
 // 激活和部分和必须一起保持，否则相邻PE的计算拍会发生错位。
+// 时序逻辑：在时钟沿更新XOUT、PEOUT；复位分支负责恢复确定的空闲状态。
 always @(posedge CLK or negedge RSTn) begin
     if (!RSTn) begin
         XOUT  <= {DATA_WIDTH{1'b0}};

@@ -6,6 +6,12 @@
 // 输出block_count个256-bit块。这样避免每个block重复发送命令和地址。
 //=============================================================================
 
+// [中文注释-自动补充]
+// 模块作用：SPI Flash权重Burst搬运控制器。
+// 关键变量/接口：一次命令连续读取多个32-Byte权重块；block_valid/ready对下游反压，done表示整段完成。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module flash_weight_burst_loader #(
     parameter SPI_DIVIDER = 16'd1,
     parameter TIMEOUT_CYCLES = 32'd100000
@@ -90,6 +96,7 @@ wire        spi_irq;
 wire [7:0]  spi_ss_n;
 wire [40:0] requested_bytes = {25'd0, cmd_block_count} << 5;
 wire [40:0] end_address_ext = {17'd0, cmd_flash_base} + requested_bytes;
+// 连续赋值：组合生成cmd_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign cmd_ready  = (state == S_IDLE);
 assign flash_csn = spi_ss_n[0];
 apb_single_master u_apb_master (
@@ -131,6 +138,7 @@ spi_top u_spi_top (
     .miso_pad_i                  (flash_miso)
 );
 
+// 辅助过程reverse_bytes_128：封装重复计算或测试激励，便于独立检查输入、输出及边界条件。
 function [127:0] reverse_bytes_128;
     input              [127:0]                  value;
     integer byte_index;
@@ -141,6 +149,7 @@ function [127:0] reverse_bytes_128;
     end
 endfunction
 
+// 辅助过程launch_write：封装重复计算或测试激励，便于独立检查输入、输出及边界条件。
 task launch_write;
     input              [4:0]                    target_addr;
     input              [31:0]                   target_data;
@@ -152,6 +161,7 @@ task launch_write;
     end
 endtask
 
+// 辅助过程launch_read：封装重复计算或测试激励，便于独立检查输入、输出及边界条件。
 task launch_read;
     input              [4:0]                    target_addr;
     begin
@@ -162,6 +172,7 @@ task launch_read;
     end
 endtask
 
+// 时序逻辑：在时钟沿更新state、base_q、count_q、chunk_select、rx_word_index、raw_chunk；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         state         <= S_INIT_DIV;

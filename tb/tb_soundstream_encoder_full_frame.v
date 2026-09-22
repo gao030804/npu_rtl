@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 
 //=============================================================================
-// 一帧PCM16 -> 31个物理卷积 -> 1x64 INT8 latent 的完整自检。
+// 一帧PCM16 -> 63个物理卷积 -> 1x64 INT8 latent 的完整自检。
 //
 // 数值检查：每次Activation写回均与Python整数golden逐byte比较。
 // 性能检查：记录每层卷积周期、下一层权重预取周期以及预取等待周期。
@@ -12,7 +12,9 @@ localparam [31:0] BUFFER_A_BASE = 32'h0000_1000;
 localparam [31:0] BUFFER_B_BASE = 32'h0000_3000;
 localparam integer CLOCK_PERIOD_NS = 10;
 localparam integer MAX_TEST_CYCLES = 50000000;
-localparam integer GOLDEN_BYTES = 31 * 8192;
+localparam integer NUM_LAYERS = 63;
+localparam integer GOLDEN_BYTES = NUM_LAYERS * 8192;
+localparam integer EXPECTED_COMPARISONS = 139136;
 `ifdef FULL_ENCODER_REAL_SPI
 localparam integer USE_REAL_SPI = 1;
 `else
@@ -93,22 +95,22 @@ integer layer;
 integer offset;
 integer golden_index;
 integer timing_file;
-integer expected_output_bytes [0:30];
-integer actual_output_bytes [0:30];
-integer compute_start_cycle [0:30];
-integer compute_done_cycle [0:30];
-integer first_weight_read_cycle [0:30];
-integer weight_sram_read_count [0:30];
-integer prefetch_start_cycle [0:30];
-integer prefetch_done_cycle [0:30];
-integer prefetch_blocks [0:30];
+integer expected_output_bytes [0:NUM_LAYERS-1];
+integer actual_output_bytes [0:NUM_LAYERS-1];
+integer compute_start_cycle [0:NUM_LAYERS-1];
+integer compute_done_cycle [0:NUM_LAYERS-1];
+integer first_weight_read_cycle [0:NUM_LAYERS-1];
+integer weight_sram_read_count [0:NUM_LAYERS-1];
+integer prefetch_start_cycle [0:NUM_LAYERS-1];
+integer prefetch_done_cycle [0:NUM_LAYERS-1];
+integer prefetch_blocks [0:NUM_LAYERS-1];
 integer prefetch_pending_layer;
 integer expected_base;
 integer transfer_cycles;
 integer compute_cycles;
 integer slack_cycles;
 integer wait_cycles;
-integer layer_start_errors [0:30];
+integer layer_start_errors [0:NUM_LAYERS-1];
 integer sum_compute_cycles;
 integer control_overhead_cycles;
 
@@ -350,19 +352,19 @@ task print_timing_report;
             sum_compute_cycles = 0;
             $display("[TIMING] on-chip Weight SRAM -> Mesh -> writeback");
             $display("[TIMING] physical logical blocks reads bytes engine_cycles sram_to_done_cycles time_ns");
-            for (layer=0; layer<31; layer=layer+1) begin
+            for (layer=0; layer<NUM_LAYERS; layer=layer+1) begin
                 compute_cycles = compute_done_cycle[layer] - compute_start_cycle[layer];
                 sum_compute_cycles = sum_compute_cycles + compute_cycles;
                 transfer_cycles = compute_done_cycle[layer] -
                                   first_weight_read_cycle[layer];
                 $display("[TIMING] %0d %0d %0d %0d %0d %0d %0d %0d",
-                         layer,(layer < 29) ? layer+1 : ((layer < 30) ? 29 : 30),
+                         layer,layer,
                          (layer==0) ? 4 : prefetch_blocks[layer],
                          weight_sram_read_count[layer],actual_output_bytes[layer],
                          compute_cycles,transfer_cycles,
                          transfer_cycles*CLOCK_PERIOD_NS);
                 $fwrite(timing_file,"%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d\n",
-                        layer,(layer < 29) ? layer+1 : ((layer < 30) ? 29 : 30),
+                        layer,layer,
                          (layer==0) ? 4 : prefetch_blocks[layer],
                         weight_sram_read_count[layer],actual_output_bytes[layer],
                         compute_cycles,transfer_cycles,
@@ -386,7 +388,7 @@ task print_timing_report;
             $fwrite(timing_file,
                 "physical,logical,blocks,transfer_cycles,compute_cycles,slack_cycles,wait_cycles,hidden\n");
         $display("[TIMING] layer blocks transfer compute slack wait hidden");
-        for (layer=0; layer<31; layer=layer+1) begin
+        for (layer=0; layer<NUM_LAYERS; layer=layer+1) begin
             compute_cycles = compute_done_cycle[layer] - compute_start_cycle[layer];
             if (layer == 0) begin
                 if (USE_REAL_SPI)
@@ -413,7 +415,7 @@ task print_timing_report;
                          layer,prefetch_blocks[layer],transfer_cycles,compute_cycles,
                          slack_cycles,wait_cycles,(slack_cycles >= 0) ? "YES" : "NO");
                 $fwrite(timing_file,"%0d,%0d,%0d,%0d,%0d,%0d,%0d,%s\n",
-                        layer,(layer < 29) ? layer+1 : ((layer < 30) ? 29 : 30),
+                        layer,layer,
                         prefetch_blocks[layer],transfer_cycles,compute_cycles,
                         slack_cycles,wait_cycles,(slack_cycles >= 0) ? "yes" : "no");
             end
@@ -436,7 +438,7 @@ initial begin
     pcm_index=0; cycle_count=0; errors=0; compare_count=0; pcm_compare_count=0;
     frame_start_cycle=-1; encoder_start_cycle=-1; encoder_done_cycle=-1;
     boot_weight_done_cycle=-1; prefetch_pending_layer=-1;
-    for (layer=0; layer<31; layer=layer+1) begin
+    for (layer=0; layer<NUM_LAYERS; layer=layer+1) begin
         expected_output_bytes[layer]=0; actual_output_bytes[layer]=0;
         compute_start_cycle[layer]=-1; compute_done_cycle[layer]=-1;
         prefetch_start_cycle[layer]=-1; prefetch_done_cycle[layer]=-1;
@@ -502,7 +504,7 @@ initial begin
         $finish;
     end
 
-    for (layer=0; layer<31; layer=layer+1) begin
+    for (layer=0; layer<NUM_LAYERS; layer=layer+1) begin
         if (actual_output_bytes[layer] != expected_output_bytes[layer]) begin
             $display("[ERROR] layer=%0d output count expected=%0d actual=%0d",
                      layer,expected_output_bytes[layer],actual_output_bytes[layer]);
@@ -515,13 +517,14 @@ initial begin
         $display("[ERROR] encoder_error asserted");
         errors=errors+1;
     end
-    if (compare_count != 97344) begin
-        $display("[ERROR] activation comparisons expected=97344 actual=%0d",compare_count);
+    if (compare_count != EXPECTED_COMPARISONS) begin
+        $display("[ERROR] activation comparisons expected=%0d actual=%0d",
+                 EXPECTED_COMPARISONS,compare_count);
         errors=errors+1;
     end
 
     if (errors==0)
-        $display("[TB_PASS] PCM16 + 31 physical convolutions + 97344 activation bytes + final 1x64 latent correct");
+        $display("[TB_PASS] PCM16 + 63 physical convolutions + 139136 activation bytes + final 1x64 latent correct");
     else
         $display("[TB_FAIL] errors=%0d comparisons=%0d",errors,compare_count);
     $finish;

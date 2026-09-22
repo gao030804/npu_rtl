@@ -11,6 +11,12 @@
 // - 在IDLE接受start的同一拍锁存全部cfg字段，使一个卷积事务内配置保持不变。
 // - 地址以Byte为单位；长度表示time维；k_groups和n_groups由Layer ROM预先计算。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：卷积配置锁存器。
+// 关键变量/接口：start握手时锁存Cin/Cout/K/步幅/膨胀/长度/基址，保证单层计算期间配置稳定。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module conv1d_config_latch (
     input                                       clk,
     input                                       rst_n,
@@ -51,6 +57,7 @@ module conv1d_config_latch (
     output reg                                  relu_enable
 );
 
+// 时序逻辑：在时钟沿更新input_base、output_base、weight_base、cin、cout、kernel；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
 

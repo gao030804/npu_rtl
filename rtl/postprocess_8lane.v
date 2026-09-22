@@ -25,6 +25,12 @@
 // - 计算链为INT32加Bias、INT64乘法、half-away-from-zero舍入、右移和INT8饱和。
 // - post_valid被反压时post_data保持不变；不能在ready=0时覆盖正在等待的数据。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：八路逐输出通道后处理。
+// 关键变量/接口：每lane独立执行Bias、Multiplier、Shift、Zero-point、舍入及INT8饱和。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module postprocess_8lane (
     input                                       clk,
     input                                       rst_n,
@@ -57,8 +63,10 @@ reg signed [63:0] shifted;
 reg signed [63:0] requantized;
 reg signed [7:0]  sat;
 reg        [63:0] calc;
+// 连续赋值：组合生成in_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign in_ready = !post_valid || post_ready;
 
+// 组合逻辑：根据当前输入计算calc、av、bv、mv、zv、sv；本逻辑块不保存跨周期状态。
 always @(*) begin
     calc        = 64'd0;
     av          = 32'sd0;
@@ -124,6 +132,7 @@ always @(*) begin
     end
 end
 
+// 时序逻辑：在时钟沿更新post_valid、post_data；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         post_valid <= 1'b0;

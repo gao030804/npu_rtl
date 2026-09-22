@@ -9,6 +9,12 @@
 // 但其AXI Memory-Mapped主口不能直接连接S28HS512T OPI引脚。
 //=============================================================================
 
+// [中文注释-自动补充]
+// 模块作用：权重流DMA。
+// 关键变量/接口：把外存流写入目标SRAM；计数器跟踪byte/block进度，只有valid&&ready才推进。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module weight_stream_dma #(
     parameter TIMEOUT_CYCLES = 32'd2000000
 ) (
@@ -56,14 +62,19 @@ wire [255:0] packed_data;
 wire       packed_last;
 wire       packed_error;
 wire       final_block = (block_index_q == block_count_q - 1'b1);
+// 连续赋值：组合生成cmd_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign cmd_ready          = (state == S_IDLE);
 assign ext_cmd_valid      = (state == S_SEND);
+// 连续赋值：组合生成ext_cmd_flash_base及其相邻接口信号，表达握手、选择或地址关系。
 assign ext_cmd_flash_base = flash_base_q;
 assign ext_cmd_byte_count = {block_count_q,5'b0};
+// 连续赋值：组合生成busy及其相邻接口信号，表达握手、选择或地址关系。
 assign busy               = (state != S_IDLE);
 assign block_valid = packed_valid && (state == S_RECV);
+// 连续赋值：组合生成packed_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign packed_ready = block_ready && (state == S_RECV);
 assign block_index = block_index_q;
+// 连续赋值：组合生成block_data及其相邻接口信号，表达握手、选择或地址关系。
 assign block_data  = packed_data;
 assign rx_ready    = (state == S_RECV) && packer_in_ready;
 octal_ddr_16to256_packer u_packer (
@@ -82,6 +93,7 @@ octal_ddr_16to256_packer u_packer (
     .out_error                   (packed_error)
 );
 
+// 时序逻辑：在时钟沿更新state、flash_base_q、block_count_q、block_index_q、timeout_q、packer_clear；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         state          <= S_IDLE;

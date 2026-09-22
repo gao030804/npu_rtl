@@ -45,6 +45,7 @@ $sources = @(
     'rvq_scale_align_8lane.v',
     'rvq_distance_8lane.v',
     'rvq_residual_update_8lane.v',
+    'rvq_projection_64to32.v',
     'rvq_core.v',
     'tb_rvq_core.v'
 ) | ForEach-Object {

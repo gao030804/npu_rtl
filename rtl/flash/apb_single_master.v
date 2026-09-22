@@ -6,6 +6,12 @@
 // 对读操作，rdata 与 done 同时有效。
 //=============================================================================
 
+// [中文注释-自动补充]
+// 模块作用：单事务APB主机。
+// 关键变量/接口：req_valid/ready接收请求，PSEL/PENABLE构成APB两阶段访问，rsp_valid返回完成或错误。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module apb_single_master (
     input                                       clk,
     input                                       rst_n,
@@ -31,10 +37,13 @@ localparam APB_IDLE   = 2'd0;
 localparam APB_SETUP  = 2'd1;
 localparam APB_ACCESS = 2'd2;
 reg [1:0] state;
+// 连续赋值：组合生成ready及其相邻接口信号，表达握手、选择或地址关系。
 assign ready   = (state == APB_IDLE);
 assign psel    = (state != APB_IDLE);
+// 连续赋值：组合生成penable及其相邻接口信号，表达握手、选择或地址关系。
 assign penable = (state == APB_ACCESS);
 
+// 时序逻辑：在时钟沿更新state、paddr、pwdata、pwrite、done、rdata；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         state  <= APB_IDLE;

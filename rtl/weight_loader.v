@@ -18,6 +18,12 @@
 // - reserved_count同时统计FIFO数据和已发未回请求，防止流水请求造成FIFO超额预留。
 // - weight_valid/ready消费FIFO头，wgt_rd_rsp_valid/ready接收SRAM响应，两组握手含义不同。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：256-bit权重读取缓冲。
+// 关键变量/接口：将SRAM请求/响应转换成内部FIFO，reserved_count避免在途响应导致FIFO溢出。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module weight_loader #(
     parameter ADDR_WIDTH = 32
 ) (
@@ -51,14 +57,18 @@ wire weight_push = wgt_rd_rsp_valid && wgt_rd_rsp_ready;
 wire [2:0] reserved_count = {1'b0, fifo_count} +
     (req_pending   ? 3'd1 : 3'd0) +
     (wait_response ? 3'd1 : 3'd0);
+// 连续赋值：组合生成cmd_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign cmd_ready        = (reserved_count < 3'd2);
 assign wgt_rd_req_valid = req_pending;
+// 连续赋值：组合生成wgt_rd_addr及其相邻接口信号，表达握手、选择或地址关系。
 assign wgt_rd_addr      = addr_q;
 assign wgt_rd_rsp_ready = wait_response &&
     ((fifo_count < 2) || weight_pop);
+// 连续赋值：组合生成weight_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign weight_valid = (fifo_count != 0);
 assign weight_data  = weight_fifo[fifo_rd_ptr];
 
+// 时序逻辑：在时钟沿更新req_pending、wait_response、addr_q、fifo_wr_ptr、fifo_rd_ptr、fifo_count；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         req_pending   <= 1'b0;

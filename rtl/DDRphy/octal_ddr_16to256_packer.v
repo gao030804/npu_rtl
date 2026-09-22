@@ -8,6 +8,12 @@
 // valid/ready允许DMA在256-bit边界处向上游施加反压。
 //=============================================================================
 
+// [中文注释-自动补充]
+// 模块作用：16-bit到256-bit权重打包器。
+// 关键变量/接口：连续收集16个16-bit beat组成一个权重块；last与error随最后一块传递。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module octal_ddr_16to256_packer (
     input                                       clk,
     input                                       rst_n,
@@ -28,8 +34,10 @@ reg [239:0] lower_words;
 reg [3:0]   word_index;
 
 // 仅在上一块已被接受或输出寄存器为空时接收新数据。
+// 连续赋值：组合生成in_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign in_ready = !out_valid || out_ready;
 
+// 时序逻辑：在时钟沿更新lower_words、word_index、out_valid、out_data、out_last、out_error；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         lower_words <= 240'd0;

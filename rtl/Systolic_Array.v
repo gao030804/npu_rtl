@@ -28,6 +28,12 @@
 // - 4行8列共32个PE。权重字节编号为8*(row*8+column)，每列生成一个输出通道部分和。
 // - 激活沿水平方向传播，部分和沿垂直方向传播；底行输出仍需deskew后才能并行对齐。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：4×8权重固定脉动阵列。
+// 关键变量/接口：4行对应reduction lane，8列对应输出通道；32个PE并行完成4×8次INT8乘加。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module Systolic_Array #(
     parameter DATA_WIDTH = 8,
     parameter ACC_WIDTH  = 20
@@ -110,12 +116,16 @@ PE #(DATA_WIDTH, ACC_WIDTH) u_pe27(CLK,RSTn,CE,WEIGHT_DATA[191:184],x26_27,p17,x
 PE #(DATA_WIDTH, ACC_WIDTH) u_pe37(CLK,RSTn,CE,WEIGHT_DATA[255:248],x36_37,p27,x37_out,p37);
 
 // 每一列的最终结果来自第3行。
+// 连续赋值：组合生成YOUT_DATA及其相邻接口信号，表达握手、选择或地址关系。
 assign YOUT_DATA[19:0]    = p30;
 assign YOUT_DATA[39:20]   = p31;
+// 连续赋值：组合生成YOUT_DATA及其相邻接口信号，表达握手、选择或地址关系。
 assign YOUT_DATA[59:40]   = p32;
 assign YOUT_DATA[79:60]   = p33;
+// 连续赋值：组合生成YOUT_DATA及其相邻接口信号，表达握手、选择或地址关系。
 assign YOUT_DATA[99:80]   = p34;
 assign YOUT_DATA[119:100] = p35;
+// 连续赋值：组合生成YOUT_DATA及其相邻接口信号，表达握手、选择或地址关系。
 assign YOUT_DATA[139:120] = p36;
 assign YOUT_DATA[159:140] = p37;
 endmodule

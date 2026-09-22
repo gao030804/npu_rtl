@@ -14,6 +14,12 @@
 // - Residual Unit入口把identity张量从Activation SRAM顺序复制到Scratchpad。
 // - 读响应先缓冲再组成64-bit写事务；done在最后一笔Scratch写握手完成后产生。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：残差Identity捕获单元。
+// 关键变量/接口：从Activation SRAM顺序读出identity并写入Scratchpad；读响应与写请求均支持反压。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module residual_capture #(
     parameter ADDR_WIDTH = 32,
     parameter SCRATCH_ADDR_WIDTH = 10,
@@ -57,34 +63,47 @@ wire [14:0] word_byte_offset = {word_index,3'b000};
 wire [14:0] low_base_index = word_byte_offset;
 wire [14:0] high_base_index = word_byte_offset + 15'd4;
 wire use_high = high_base_index < bytes_q;
+// 连续赋值：组合生成start_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign start_ready = (state == S_IDLE);
 assign busy = (state != S_IDLE);
+// 连续赋值：组合生成act_req_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign act_req_valid = (state == S_REQ_LO) || (state == S_REQ_HI);
 assign act_rsp_ready = (state == S_WAIT_LO) || (state == S_WAIT_HI);
 wire request_high = (state == S_REQ_HI);
 wire [14:0] request_offset = request_high ? high_base_index : low_base_index;
 wire [ADDR_WIDTH-1:0] request_addr = base_q + request_offset;
+// 连续赋值：组合生成act_addr0及其相邻接口信号，表达握手、选择或地址关系。
 assign act_addr0 = request_addr;
 assign act_addr1 = request_addr + 1'b1;
+// 连续赋值：组合生成act_addr2及其相邻接口信号，表达握手、选择或地址关系。
 assign act_addr2 = request_addr + 2'd2;
 assign act_addr3 = request_addr + 2'd3;
+// 连续赋值：组合生成act_mask及其相邻接口信号，表达握手、选择或地址关系。
 assign act_mask[0] = (request_offset     < bytes_q);
 assign act_mask[1] = ((request_offset+1) < bytes_q);
+// 连续赋值：组合生成act_mask及其相邻接口信号，表达握手、选择或地址关系。
 assign act_mask[2] = ((request_offset+2) < bytes_q);
 assign act_mask[3] = ((request_offset+3) < bytes_q);
+// 连续赋值：组合生成scratch_wr_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign scratch_wr_valid = (state == S_WRITE);
 assign scratch_wr_addr  = word_index;
+// 连续赋值：组合生成scratch_wr_data及其相邻接口信号，表达握手、选择或地址关系。
 assign scratch_wr_data  = {high_q,low_q};
 assign scratch_wr_strb[0] = (word_byte_offset     < bytes_q);
+// 连续赋值：组合生成scratch_wr_strb及其相邻接口信号，表达握手、选择或地址关系。
 assign scratch_wr_strb[1] = ((word_byte_offset+1) < bytes_q);
 assign scratch_wr_strb[2] = ((word_byte_offset+2) < bytes_q);
+// 连续赋值：组合生成scratch_wr_strb及其相邻接口信号，表达握手、选择或地址关系。
 assign scratch_wr_strb[3] = ((word_byte_offset+3) < bytes_q);
 assign scratch_wr_strb[4] = ((word_byte_offset+4) < bytes_q);
+// 连续赋值：组合生成scratch_wr_strb及其相邻接口信号，表达握手、选择或地址关系。
 assign scratch_wr_strb[5] = ((word_byte_offset+5) < bytes_q);
 assign scratch_wr_strb[6] = ((word_byte_offset+6) < bytes_q);
+// 连续赋值：组合生成scratch_wr_strb及其相邻接口信号，表达握手、选择或地址关系。
 assign scratch_wr_strb[7] = ((word_byte_offset+7) < bytes_q);
 wire [14:0] next_word_offset = word_byte_offset + 15'd8;
 
+// 时序逻辑：在时钟沿更新state、base_q、bytes_q、word_index、low_q、high_q；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         state      <= S_IDLE;

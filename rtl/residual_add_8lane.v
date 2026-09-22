@@ -18,6 +18,12 @@
 // - 加法使用signed 9-bit中间值并饱和到[-128,127]；write strobe为0的lane不产生有效结果。
 // - 当前要求主分支与identity使用相同Scale；非单位Residual Scale需额外Requant参数。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：八路残差加法器。
+// 关键变量/接口：main和identity按lane作signed 9-bit加法并饱和到INT8；要求两分支量化Scale一致。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module residual_add_8lane #(
     parameter ADDR_WIDTH = 32,
     parameter SCRATCH_ADDR_WIDTH = 10
@@ -52,16 +58,20 @@ reg [63:0] data_q;
 reg [7:0] strb_q;
 wire [ADDR_WIDTH-1:0] byte_offset = addr_q - base_q;
 wire [ADDR_WIDTH-1:0] input_byte_offset = in_addr - output_base;
+// 连续赋值：组合生成in_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign in_ready = (state == S_IDLE) && (!out_valid || out_ready);
 
 // state回到IDLE但out_valid仍被反压时，模块仍未排空。
+// 连续赋值：组合生成busy及其相邻接口信号，表达握手、选择或地址关系。
 assign busy = (state != S_IDLE) || out_valid;
 assign scratch_rd_valid = (state == S_READ);
+// 连续赋值：组合生成scratch_rd_addr及其相邻接口信号，表达握手、选择或地址关系。
 assign scratch_rd_addr = byte_offset[SCRATCH_ADDR_WIDTH+2:3];
 integer lane;
 reg signed [8:0] lane_sum;
 reg [63:0] added_data;
 
+// 组合逻辑：根据当前输入计算added_data、lane_sum、lane；本逻辑块不保存跨周期状态。
 always @(*) begin
     added_data = 64'd0;
     lane_sum = 9'sd0;
@@ -79,6 +89,7 @@ always @(*) begin
     end
 end
 
+// 时序逻辑：在时钟沿更新state、addr_q、base_q、data_q、strb_q、out_valid；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         state     <= S_IDLE;

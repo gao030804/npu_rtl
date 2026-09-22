@@ -38,7 +38,7 @@
 ////                                                              ////
 //////////////////////////////////////////////////////////////////////
 
-// This spi_top module has been modified from the original to add in 
+// This spi_top module has been modified from the original to add in
 // an APB interface
 //
 //
@@ -46,6 +46,12 @@
 `include "spi_defines.v"
 `include "timescale.v"
 
+// [中文注释-自动补充]
+// 模块作用：SPI控制器顶层。
+// 关键变量/接口：寄存器配置命令、地址和长度；wb_ack_o完成总线访问，ss_pad_o/sclk_pad_o/mosi_pad_o连接Flash。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module spi_top
 (
   // APB Signals
@@ -58,7 +64,7 @@ module spi_top
 );
 
   parameter Tp = 1;
-  
+
   input                            PCLK;            // APB System Clock
   input                            PRESETN;         // APB Reset - Active low
   input [4:0]                      PADDR;           // APB Address
@@ -70,17 +76,17 @@ module spi_top
   output                           PREADY;
   output                           PSLVERR;
   output                           IRQ;
-                                                     
-  // SPI signals                                     
+
+  // SPI signals
   output          [`SPI_SS_NB-1:0] ss_pad_o;         // slave select
   output                           sclk_pad_o;       // serial clock
   output                           mosi_pad_o;       // master out slave in
   input                            miso_pad_i;       // master in slave out
-                                                     
+
   reg                     [32-1:0] PRDATA;
   reg                              PREADY;
   reg                              IRQ;
-                                               
+
   // Internal signals
   reg       [`SPI_DIVIDER_LEN-1:0] divider;          // Divider register
   reg       [`SPI_CTRL_BIT_NB-1:0] ctrl;             // Control and status register
@@ -102,16 +108,20 @@ module spi_top
   wire                             pos_edge;         // recognize posedge of sclk
   wire                             neg_edge;         // recognize negedge of sclk
   wire                             last_bit;         // marks last character bit
-  
+
   // Address decoder
+  // 连续赋值：组合生成spi_divider_sel及其相邻接口信号，表达握手、选择或地址关系。
   assign spi_divider_sel = PSEL & PENABLE & (PADDR[`SPI_OFS_BITS] == `SPI_DEVIDE);
   assign spi_ctrl_sel    = PSEL & PENABLE & (PADDR[`SPI_OFS_BITS] == `SPI_CTRL);
+  // 连续赋值：组合生成spi_tx_sel及其相邻接口信号，表达握手、选择或地址关系。
   assign spi_tx_sel[0]   = PSEL & PENABLE & (PADDR[`SPI_OFS_BITS] == `SPI_TX_0);
   assign spi_tx_sel[1]   = PSEL & PENABLE & (PADDR[`SPI_OFS_BITS] == `SPI_TX_1);
+  // 连续赋值：组合生成spi_tx_sel及其相邻接口信号，表达握手、选择或地址关系。
   assign spi_tx_sel[2]   = PSEL & PENABLE & (PADDR[`SPI_OFS_BITS] == `SPI_TX_2);
   assign spi_tx_sel[3]   = PSEL & PENABLE & (PADDR[`SPI_OFS_BITS] == `SPI_TX_3);
+  // 连续赋值：组合生成spi_ss_sel及其相邻接口信号，表达握手、选择或地址关系。
   assign spi_ss_sel      = PSEL & PENABLE & (PADDR[`SPI_OFS_BITS] == `SPI_SS);
-  
+
   // Read from registers
   always @(PADDR or rx or ctrl or divider or ss)
   begin
@@ -140,8 +150,9 @@ module spi_top
       default:      wb_dat = 32'bx;
     endcase
   end
-  
+
   // Wb data out
+  // 时序逻辑：在时钟沿更新PRDATA、PREADY、IRQ、divider；复位分支负责恢复确定的空闲状态。
   always @(posedge PCLK or negedge PRESETN)
   begin
     if (PRESETN == 0)
@@ -149,8 +160,9 @@ module spi_top
     else
       PRDATA <= #Tp wb_dat;
   end
-  
+
   // Wb acknowledge
+  // 时序逻辑：在时钟沿更新PREADY、IRQ、divider；复位分支负责恢复确定的空闲状态。
   always @(posedge PCLK or negedge PRESETN)
   begin
     if (PRESETN == 0)
@@ -158,11 +170,13 @@ module spi_top
     else
       PREADY <= #Tp PSEL & PENABLE & ~PREADY;
   end
-  
+
   // Wb error
+  // 连续赋值：组合生成PSLVERR及其相邻接口信号，表达握手、选择或地址关系。
   assign PSLVERR = 1'b0;
-  
+
   // Interrupt
+  // 时序逻辑：在时钟沿更新IRQ、divider、ctrl；复位分支负责恢复确定的空闲状态。
   always @(posedge PCLK or negedge PRESETN)
   begin
     if (PRESETN == 0)
@@ -172,8 +186,9 @@ module spi_top
     else if (PREADY)
       IRQ <= #Tp 1'b0;
   end
-  
+
   // Divider register
+  // 时序逻辑：在时钟沿更新divider、ctrl；复位分支负责恢复确定的空闲状态。
   always @(posedge PCLK or negedge PRESETN)
   begin
     if (PRESETN == 0)
@@ -181,7 +196,7 @@ module spi_top
     else if (spi_divider_sel && PWRITE && !tip)
       begin
       `ifdef SPI_DIVIDER_LEN_8
-        
+
           divider <= #Tp PWDATA[`SPI_DIVIDER_LEN-1:0];
       `endif
       `ifdef SPI_DIVIDER_LEN_16
@@ -195,8 +210,9 @@ module spi_top
       `endif
       end
   end
-  
+
   // Ctrl register
+  // 时序逻辑：在时钟沿更新ctrl、ss；复位分支负责恢复确定的空闲状态。
   always @(posedge PCLK or negedge PRESETN)
   begin
     if (PRESETN == 0)
@@ -208,16 +224,21 @@ module spi_top
     else if(tip && last_bit && pos_edge)
       ctrl[`SPI_CTRL_GO] <= #Tp 1'b0;
   end
-  
+
+  // 连续赋值：组合生成rx_negedge及其相邻接口信号，表达握手、选择或地址关系。
   assign rx_negedge = ctrl[`SPI_CTRL_RX_NEGEDGE];
   assign tx_negedge = ctrl[`SPI_CTRL_TX_NEGEDGE];
+  // 连续赋值：组合生成go及其相邻接口信号，表达握手、选择或地址关系。
   assign go         = ctrl[`SPI_CTRL_GO];
   assign char_len   = ctrl[`SPI_CTRL_CHAR_LEN];
+  // 连续赋值：组合生成lsb及其相邻接口信号，表达握手、选择或地址关系。
   assign lsb        = ctrl[`SPI_CTRL_LSB];
   assign ie         = ctrl[`SPI_CTRL_IE];
+  // 连续赋值：组合生成ass及其相邻接口信号，表达握手、选择或地址关系。
   assign ass        = ctrl[`SPI_CTRL_ASS];
-  
+
   // Slave select register
+  // 时序逻辑：在时钟沿更新ss；复位分支负责恢复确定的空闲状态。
   always @(posedge PCLK or negedge PRESETN)
   begin
     if (PRESETN == 0)
@@ -238,20 +259,21 @@ module spi_top
       `endif
       end
   end
-  
+
+  // 连续赋值：组合生成ss_pad_o及其相邻接口信号，表达握手、选择或地址关系。
   assign ss_pad_o = ~((ss & {`SPI_SS_NB{tip & ass}}) | (ss & {`SPI_SS_NB{!ass}}));
-  
+
   spi_clgen clgen (.clk_in(PCLK), .rst(!PRESETN), .go(go), .enable(tip), .last_clk(last_bit),
-                   .divider(divider), .clk_out(sclk_pad_o), .pos_edge(pos_edge), 
+                   .divider(divider), .clk_out(sclk_pad_o), .pos_edge(pos_edge),
                    .neg_edge(neg_edge));
-  
+
   spi_shift shift (.clk(PCLK), .rst(!PRESETN), .len(char_len[`SPI_CHAR_LEN_BITS-1:0]),
-                   .latch(spi_tx_sel[3:0] & {4{PWRITE}}), .byte_sel(4'hF), .lsb(lsb), 
-                   .go(go), .pos_edge(pos_edge), .neg_edge(neg_edge), 
+                   .latch(spi_tx_sel[3:0] & {4{PWRITE}}), .byte_sel(4'hF), .lsb(lsb),
+                   .go(go), .pos_edge(pos_edge), .neg_edge(neg_edge),
                    .rx_negedge(rx_negedge), .tx_negedge(tx_negedge),
-                   .tip(tip), .last(last_bit), 
-                   .p_in(PWDATA), .p_out(rx), 
+                   .tip(tip), .last(last_bit),
+                   .p_in(PWDATA), .p_out(rx),
                    .s_clk(sclk_pad_o), .s_in(miso_pad_i), .s_out(mosi_pad_o));
-                   
+
 endmodule
-  
+

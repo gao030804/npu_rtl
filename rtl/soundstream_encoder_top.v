@@ -16,6 +16,12 @@
 // - current_buffer_select指示本层输入Buffer，下一组Buffer接收本层输出；每个物理卷积完成后交换角色。
 // - Activation读口在Residual Capture、卷积引擎和结果读取之间仲裁；运行时Capture优先级最高。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：SoundStream Encoder集成顶层。
+// 关键变量/接口：连接63层调度、激活Ping-Pong、残差通路、卷积引擎和多级权重存储。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module soundstream_encoder_top #(
     parameter ADDR_WIDTH = 32,
     parameter BUFFER_A_BASE = 32'h0000_1000,
@@ -158,6 +164,7 @@ wire scheduler_engine_done = residual_add_enable ?
 // engine_done只表示卷积引擎最后一个输出已被下游接受。
 // Residual层还必须等待最后一个Scratch读、加法和Activation写回完成。
 
+// 时序逻辑：在时钟沿更新residual_done_pending；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n)
         residual_done_pending <= 1'b0;
@@ -221,10 +228,13 @@ soundstream_encoder_scheduler u_scheduler (
     .cfg_weight_block_count      (cfg_weight_blocks)
 );
 
+// 连续赋值：组合生成error及其相邻接口信号，表达握手、选择或地址关系。
 assign error = sched_error | engine_error | flash_error | datapath_aux_error;
 assign input_buffer_select = current_buffer_select;
+// 连续赋值：组合生成input_buffer_base及其相邻接口信号，表达握手、选择或地址关系。
 assign input_buffer_base = current_buffer_select ? BUFFER_B_BASE : BUFFER_A_BASE;
 assign result_buffer_select = current_buffer_select;
+// 连续赋值：组合生成result_buffer_base及其相邻接口信号，表达握手、选择或地址关系。
 assign result_buffer_base = input_buffer_base;
 assign param_rd_layer = physical_layer;
 wire [ADDR_WIDTH-1:0] current_base = current_buffer_select ? BUFFER_B_BASE : BUFFER_A_BASE;
@@ -424,6 +434,7 @@ wire [ADDR_WIDTH-1:0] encoded_wr_addr = residual_add_enable ? add_out_addr : eng
 wire [63:0] encoded_wr_data = residual_add_enable ? add_out_data : eng_out_data;
 wire [7:0] encoded_wr_strb = residual_add_enable ? add_out_strb : eng_out_strb;
 wire buffer_wr_ready;
+// 连续赋值：组合生成eng_out_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign eng_out_ready = residual_add_enable ? add_in_ready : buffer_wr_ready;
 assign add_out_ready = buffer_wr_ready;
 
@@ -432,36 +443,50 @@ wire buf_rd_req_valid,buf_rd_req_ready,buf_rd_rsp_valid,buf_rd_rsp_ready;
 wire [ADDR_WIDTH-1:0] buf_addr0,buf_addr1,buf_addr2,buf_addr3;
 wire [3:0] buf_mask;
 wire [31:0] buf_rsp_data;
+// 连续赋值：组合生成buf_rd_req_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign buf_rd_req_valid = capture_busy ? cap_act_req_valid : (busy ? eng_act_req_valid : result_rd_req_valid);
 assign buf_addr0 = capture_busy ? cap_addr0 : (busy ? eng_act_addr0 : result_rd_addr0);
+// 连续赋值：组合生成buf_addr1及其相邻接口信号，表达握手、选择或地址关系。
 assign buf_addr1 = capture_busy ? cap_addr1 : (busy ? eng_act_addr1 : result_rd_addr1);
 assign buf_addr2 = capture_busy ? cap_addr2 : (busy ? eng_act_addr2 : result_rd_addr2);
+// 连续赋值：组合生成buf_addr3及其相邻接口信号，表达握手、选择或地址关系。
 assign buf_addr3 = capture_busy ? cap_addr3 : (busy ? eng_act_addr3 : result_rd_addr3);
 assign buf_mask  = capture_busy ? cap_mask  : (busy ? eng_act_mask  : result_rd_mask);
+// 连续赋值：组合生成cap_act_req_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign cap_act_req_ready = capture_busy && buf_rd_req_ready;
 assign eng_act_req_ready = !capture_busy && busy && buf_rd_req_ready;
+// 连续赋值：组合生成result_rd_req_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign result_rd_req_ready = !busy && buf_rd_req_ready;
 assign cap_act_rsp_valid = capture_busy && buf_rd_rsp_valid;
+// 连续赋值：组合生成eng_act_rsp_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign eng_act_rsp_valid = !capture_busy && busy && buf_rd_rsp_valid;
 assign result_rd_rsp_valid = !busy && buf_rd_rsp_valid;
+// 连续赋值：组合生成cap_data及其相邻接口信号，表达握手、选择或地址关系。
 assign cap_data = buf_rsp_data;
 assign eng_act_data = buf_rsp_data;
+// 连续赋值：组合生成result_rd_data及其相邻接口信号，表达握手、选择或地址关系。
 assign result_rd_data = buf_rsp_data;
 assign buf_rd_rsp_ready = capture_busy ? cap_act_rsp_ready : (busy ? eng_act_rsp_ready : result_rd_rsp_ready);
 wire buffer_wr_valid = busy ? encoded_wr_valid : input_wr_valid;
 wire [ADDR_WIDTH-1:0] buffer_wr_addr = busy ? encoded_wr_addr : input_wr_addr;
 wire [63:0] buffer_wr_data = busy ? encoded_wr_data : input_wr_data;
 wire [7:0] buffer_wr_strb = busy ? encoded_wr_strb : input_wr_strb;
+// 连续赋值：组合生成input_wr_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign input_wr_ready = !busy && buffer_wr_ready;
 assign layer_write_fire = busy && encoded_wr_valid && buffer_wr_ready;
+// 连续赋值：组合生成layer_write_addr及其相邻接口信号，表达握手、选择或地址关系。
 assign layer_write_addr = encoded_wr_addr;
 assign layer_write_data = encoded_wr_data;
+// 连续赋值：组合生成layer_write_strb及其相邻接口信号，表达握手、选择或地址关系。
 assign layer_write_strb = encoded_wr_strb;
 assign perf_engine_start = engine_start;
+// 连续赋值：组合生成perf_engine_done及其相邻接口信号，表达握手、选择或地址关系。
 assign perf_engine_done = scheduler_engine_done;
 assign perf_weight_sram_read_fire = engine_weight_read_fire;
+// 连续赋值：组合生成perf_weight_prefetch_fire及其相邻接口信号，表达握手、选择或地址关系。
 assign perf_weight_prefetch_fire = weight_prefetch_valid && weight_prefetch_ready;
 assign perf_weight_prefetch_done = weight_prefetch_done;
+// 连续赋值：组合生成perf_weight_prefetch_base及其相邻接口信号，表达握手、选择或地址关系。
 assign perf_weight_prefetch_base = weight_prefetch_base;
 assign perf_weight_prefetch_blocks = weight_prefetch_blocks;
 activation_buffer_pingpong u_activation_buffer (

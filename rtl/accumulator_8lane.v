@@ -20,6 +20,12 @@
 // - first_k_group=1时覆盖旧值，其他k_group读取旧值后相加，形成完整Cin*K规约。
 // - pipeline_busy表示仍有未提交的读改写事务，控制器必须等待其清空后读最终结果。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：八路INT32跨k_group累加器。
+// 关键变量/接口：输入为8路INT20部分和；首组覆盖，后续组累加；按m_tag索引保存输出位置。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module accumulator_8lane #(
     parameter MAX_M       = 320,
     parameter M_TAG_WIDTH = 9
@@ -78,19 +84,23 @@ reg [3:0]                 post_rsp_count;
 // 但首组覆盖写与 RMW 写回共用写端口，所以必须等待。
 // 后续K组使用1R1W端口：本拍写回上一项的同时，可读取下一项，II=1。
 // 只有第一K组直接覆盖写与尚未结束的RMW写回冲突时才暂停输入。
+// 连续赋值：组合生成in_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign in_ready = !rd_req_valid && !rd_rsp_valid && !post_read_pending &&
     !(first_k_group && rmw_pending);
 wire post_rsp_pop = rd_rsp_valid && rd_rsp_ready;
 wire [4:0] post_reserved_count = {1'b0, post_rsp_count} +
     (post_read_pending ? 5'd1 : 5'd0);
 wire post_rsp_has_space = (post_reserved_count < 5'd8) || post_rsp_pop;
+// 连续赋值：组合生成rd_req_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign rd_req_ready = !in_valid && !rmw_pending && post_rsp_has_space;
 wire in_fire       = in_valid && in_ready;
 wire first_wr_fire = in_fire &&  first_k_group;
 wire rmw_rd_fire   = in_fire && !first_k_group;
 wire post_rd_fire  = rd_req_valid && rd_req_ready;
+// 连续赋值：组合生成pipeline_busy及其相邻接口信号，表达握手、选择或地址关系。
 assign pipeline_busy = rmw_pending;
 assign rd_rsp_valid = (post_rsp_count != 0);
+// 连续赋值：组合生成rd_rsp_data及其相邻接口信号，表达握手、选择或地址关系。
 assign rd_rsp_data  = post_rsp_data_fifo[post_rsp_rd_ptr];
 assign rd_rsp_addr  = post_rsp_addr_fifo[post_rsp_rd_ptr];
 
@@ -220,6 +230,7 @@ opentitan_sram_1r1w_adapter #(.WIDTH(32),
 
 // 锁存 RMW 标签/加数，并把后处理读出的 8 个 Bank 拼成 256 bit。
 
+// 时序逻辑：在时钟沿更新rmw_pending、rmw_addr、post_read_pending、post_read_addr_q、post_rsp_wr_ptr、post_rsp_rd_ptr；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         rmw_pending       <= 1'b0;

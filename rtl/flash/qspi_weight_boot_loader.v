@@ -22,6 +22,12 @@
 // - block_valid/ready支持Global SRAM反压；block_index只在完整32-Byte块被接受时递增。
 // - QSPI_HALF_DIV=1且系统时钟100 MHz时，输出SCLK为50 MHz。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：QSPI上电权重加载器。
+// 关键变量/接口：以50MHz Quad Fast Read连续读取Flash，按byte再按256-bit block组装后写Global SRAM。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module qspi_weight_boot_loader #(
     parameter QSPI_HALF_DIV       = 16'd1,
     parameter POWER_UP_CYCLES     = 32'd7000,
@@ -75,10 +81,13 @@ reg [255:0] data_shift;
 reg [3:0]  dq_out;
 reg [3:0]  dq_oe;
 wire [3:0] dq_in = flash_dq;
+// 连续赋值：组合生成flash_dq及其相邻接口信号，表达握手、选择或地址关系。
 assign flash_dq[0] = dq_oe[0] ? dq_out[0] : 1'bz;
 assign flash_dq[1] = dq_oe[1] ? dq_out[1] : 1'bz;
+// 连续赋值：组合生成flash_dq及其相邻接口信号，表达握手、选择或地址关系。
 assign flash_dq[2] = dq_oe[2] ? dq_out[2] : 1'bz;
 assign flash_dq[3] = dq_oe[3] ? dq_out[3] : 1'bz;
+// 连续赋值：组合生成cmd_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign cmd_ready = (state == S_IDLE);
 
 // SCLK只在串行事务状态翻转；其余时间固定为0。
@@ -89,6 +98,7 @@ wire half_tick = serial_active && (half_div_count == QSPI_HALF_DIV - 1'b1);
 wire rising_tick  = half_tick && !flash_sclk;
 wire falling_tick = half_tick &&  flash_sclk;
 
+// 时序逻辑：在时钟沿更新state、wait_count、cs_high_count、timeout_count、half_div_count、bit_count；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         state          <= S_POWER_WAIT;

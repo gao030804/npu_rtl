@@ -19,6 +19,12 @@
 // - generate优先级为快速仿真模型、Global/Local层级、Octal路径、旧SPI A/B Cache。
 // - 综合配置只能启用一种权重来源；不同分支的未使用外部端口会被固定到安全值。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：卷积引擎与权重层次封装。
+// 关键变量/接口：根据参数选择快速模型、Global/Local、Octal或SPI缓存，并连接统一Weight SRAM接口。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module conv1d_engine_flash_top #(
     parameter ADDR_WIDTH = 32,
     parameter M_TAG_WIDTH = 9,
@@ -144,6 +150,7 @@ wire [ADDR_WIDTH-1:0]     wgt_rd_addr;
 wire                      wgt_rd_rsp_valid;
 wire                      wgt_rd_rsp_ready;
 wire [255:0]              wgt_rd_data;
+// 连续赋值：组合生成error及其相邻接口信号，表达握手、选择或地址关系。
 assign error = engine_error | flash_error;
 assign perf_weight_read_fire = wgt_rd_req_valid && wgt_rd_req_ready;
 conv1d_engine_top #(
@@ -210,10 +217,13 @@ conv1d_engine_top #(
     .out_wr_strb                 (out_wr_strb)
 );
 
+// 参数化生成块：综合时只保留满足参数条件的硬件分支，未选分支不参与数据通路。
 generate
     if (FAST_SIM_WEIGHT_CACHE) begin : g_fast_sim_weight_cache
+            // 连续赋值：组合生成octal_cmd_valid及其相邻接口信号，表达握手、选择或地址关系。
             assign octal_cmd_valid      = 1'b0;
         assign octal_cmd_flash_base = 24'd0;
+        // 连续赋值：组合生成octal_cmd_byte_count及其相邻接口信号，表达握手、选择或地址关系。
         assign octal_cmd_byte_count = 24'd0;
         assign octal_rx_ready       = 1'b0;
         weight_cache_ab_fast_model u_weight_cache (
@@ -247,11 +257,14 @@ generate
             .flash_miso                  (flash_miso)
         );
 
+        // 连续赋值：组合生成flash_wp及其相邻接口信号，表达握手、选择或地址关系。
         assign flash_wp   = 1'bz;
         assign flash_hold = 1'bz;
     end else if (USE_GLOBAL_WEIGHT_HIERARCHY) begin : g_encoder_weight_hierarchy
+        // 连续赋值：组合生成octal_cmd_valid及其相邻接口信号，表达握手、选择或地址关系。
         assign octal_cmd_valid      = 1'b0;
         assign octal_cmd_flash_base = 24'd0;
+        // 连续赋值：组合生成octal_cmd_byte_count及其相邻接口信号，表达握手、选择或地址关系。
         assign octal_cmd_byte_count = 24'd0;
         assign octal_rx_ready       = 1'b0;
         wire global_sram_active_unused;
@@ -305,10 +318,13 @@ generate
         );
 
     end else if (USE_OCTAL_STREAM_CACHE) begin : g_octal_weight_cache
+        // 连续赋值：组合生成flash_csn及其相邻接口信号，表达握手、选择或地址关系。
         assign flash_csn  = 1'b1;
         assign flash_sclk = 1'b0;
+        // 连续赋值：组合生成flash_mosi及其相邻接口信号，表达握手、选择或地址关系。
         assign flash_mosi = 1'b0;
         assign flash_wp   = 1'bz;
+        // 连续赋值：组合生成flash_hold及其相邻接口信号，表达握手、选择或地址关系。
         assign flash_hold = 1'bz;
         wire        sys_rx_valid;
         wire        sys_rx_ready;
@@ -373,8 +389,10 @@ generate
         );
 
     end else begin : g_real_weight_cache
+        // 连续赋值：组合生成octal_cmd_valid及其相邻接口信号，表达握手、选择或地址关系。
         assign octal_cmd_valid      = 1'b0;
         assign octal_cmd_flash_base = 24'd0;
+        // 连续赋值：组合生成octal_cmd_byte_count及其相邻接口信号，表达握手、选择或地址关系。
         assign octal_cmd_byte_count = 24'd0;
         assign octal_rx_ready       = 1'b0;
         weight_cache_ab #(
@@ -414,6 +432,7 @@ generate
             .flash_miso                  (flash_miso)
         );
 
+        // 连续赋值：组合生成flash_wp及其相邻接口信号，表达握手、选择或地址关系。
         assign flash_wp   = 1'bz;
         assign flash_hold = 1'bz;
     end

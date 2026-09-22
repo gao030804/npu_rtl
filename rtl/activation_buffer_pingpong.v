@@ -24,6 +24,12 @@
 // - 一次64-bit写回可更新8个INT8；wr_strb逐字节控制，未使能字节保持原值。
 // - 四路读地址若访问同一Bank但row不同会产生端口冲突并报告error。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：Activation SRAM Ping-Pong缓存。
+// 关键变量/接口：A/B Buffer交替作为输入和输出；4个16-bit Bank支持四路byte读取和64-bit带strobe写入。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module activation_buffer_pingpong #(
     parameter ADDR_WIDTH = 32,
     parameter ROW_WIDTH  = 10,
@@ -69,6 +75,7 @@ integer decode_bank;
 reg [ADDR_WIDTH-1:0] decode_addr;
 reg [ADDR_WIDTH-1:0] decode_offset;
 
+// 组合逻辑：根据当前输入计算decode_conflict、decode_oob、decode_addr、decode_offset、decode_bank、decode_lane；本逻辑块不保存跨周期状态。
 always @(*) begin
     decoded_row[0]  = {ROW_WIDTH{1'b0}};
     decoded_row[1]  = {ROW_WIDTH{1'b0}};
@@ -133,10 +140,12 @@ wire [4:0] reserved_rsp_count = {1'b0, rsp_count} +
     (rd_meta_valid ? 5'd1 : 5'd0);
 
 // 返回 FIFO 和一拍 SRAM 读流水级共同提供反压；正常情况下可每拍读一次。
+// 连续赋值：组合生成rd_req_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign rd_req_ready = (reserved_rsp_count < 5'd8) || rsp_pop;
 wire rd_fire = rd_req_valid && rd_req_ready;
 wire rd_issue = rd_fire && !decode_conflict && !decode_oob;
 wire same_buffer = (rd_buffer_select == wr_buffer_select);
+// 连续赋值：组合生成wr_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign wr_ready = !same_buffer || !rd_fire;
 wire [ADDR_WIDTH-1:0] wr_offset = wr_addr - wr_buffer_base;
 wire [ROW_WIDTH-1:0] wr_row = wr_offset[ROW_WIDTH+2:3];
@@ -263,11 +272,13 @@ wire [15:0] read_q0 = rd_buffer_select_q ? b_q0 : a_q0;
 wire [15:0] read_q1 = rd_buffer_select_q ? b_q1 : a_q1;
 wire [15:0] read_q2 = rd_buffer_select_q ? b_q2 : a_q2;
 wire [15:0] read_q3 = rd_buffer_select_q ? b_q3 : a_q3;
+// 连续赋值：组合生成rd_rsp_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign rd_rsp_valid = (rsp_count != 0);
 assign rd_rsp_data  = rsp_fifo[rsp_rd_ptr];
 reg [31:0] assembled_read_data;
 integer assemble_lane;
 
+// 组合逻辑：根据当前输入计算assembled_read_data、assemble_lane、seq_lane；本逻辑块不保存跨周期状态。
 always @(*) begin
     assembled_read_data = 32'd0;
     for (assemble_lane=0;assemble_lane<4;assemble_lane=assemble_lane+1) begin
@@ -288,6 +299,7 @@ always @(*) begin
     end
 end
 
+// 时序逻辑：在时钟沿更新rd_meta_valid、rd_buffer_select_q、lane_mask_q、rsp_wr_ptr、rsp_rd_ptr、rsp_count；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         rd_meta_valid <= 1'b0;

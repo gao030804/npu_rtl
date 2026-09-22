@@ -17,6 +17,12 @@
 // - 将地址、64-bit数据和8-bit字节使能注册后送往Activation SRAM写端口。
 // - out_wr_valid等待out_wr_ready期间保持，只有真实握手后才能接收下一组结果。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：八路INT8写回适配器。
+// 关键变量/接口：把8个通道打成64-bit数据并产生byte strobe；ready为0时保持地址和数据。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module output_writer_8lane #(
     parameter ADDR_WIDTH = 32
 ) (
@@ -34,8 +40,10 @@ module output_writer_8lane #(
     output reg         [7:0]                    out_wr_strb
 );
 
+// 连续赋值：组合生成in_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign in_ready = !out_wr_valid || out_wr_ready;
 
+// 时序逻辑：在时钟沿更新out_wr_valid、out_wr_addr、out_wr_data、out_wr_strb；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         out_wr_valid <= 1'b0;

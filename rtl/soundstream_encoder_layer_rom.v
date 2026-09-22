@@ -17,6 +17,12 @@
 // - Dense的k_total=Cin*K；Depthwise的k_total=K。n_groups=ceil(Cout/8)，k_groups=ceil(k_total/4)。
 // - weight_flash_base为Byte地址，weight_block_count以32-Byte/256-bit块为单位。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：63层Encoder配置ROM。
+// 关键变量/接口：给出每层形状、卷积类型、残差标志和权重范围；Dense的k_total=Cin×K，Depthwise为K。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module soundstream_encoder_layer_rom (
     input              [5:0]                    layer_index,
     output reg                                  valid,
@@ -47,12 +53,15 @@ reg [23:0] base_sum;
 // reduction_count决定一组输出需要多少个k_group：
 // Dense：Cin*K；Depthwise：每个输出通道只对应自己的K个权重，因此为K。
 wire [13:0] reduction_count = is_depthwise ? {9'd0,kernel} : cin * kernel;
+// 连续赋值：组合生成k_total及其相邻接口信号，表达握手、选择或地址关系。
 assign k_total  = reduction_count[11:0];
 assign k_groups = (reduction_count + 14'd3) >> 2;
+// 连续赋值：组合生成n_groups及其相邻接口信号，表达握手、选择或地址关系。
 assign n_groups = (cout + 9'd7) >> 3;
 
 // 63 层的 256-bit 块数；总和为 5084，即 162688 Byte。
 
+// 辅助过程layer_blocks：封装重复计算或测试激励，便于独立检查输入、输出及边界条件。
 function [15:0] layer_blocks;
     input              [5:0]                    x;
     begin
@@ -80,6 +89,7 @@ function [15:0] layer_blocks;
     end
 endfunction
 
+// 组合逻辑：根据当前输入计算valid、logical_layer、cin、cout、kernel、stride；本逻辑块不保存跨周期状态。
 always @(*) begin
     valid=1;
     logical_layer=layer_index;

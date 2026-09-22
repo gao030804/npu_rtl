@@ -26,6 +26,12 @@
 // - time=m*stride-left_pad+kernel_index*dilation，addr=input_base+time*Cin+channel_index。
 // - time越界或r>=Cin*K时清除对应valid_mask；mask=0的地址值不得用于SRAM访问。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：4路Activation地址生成器。
+// 关键变量/接口：r=4*k_group+lane；time=m*stride-pad+(r/Cin)*dilation；越界lane由valid_mask屏蔽。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module conv1d_agu #(
     parameter ADDR_WIDTH = 32,                    // SRAM 地址宽度
     parameter M_TAG_WIDTH = 9                     // 输出时间位置 m 的位宽
@@ -55,6 +61,7 @@ reg [8:0] channel_index;
 reg signed [20:0] time_index;                    // 21 位有符号，保证左 Padding 时可以表示负地址。
 reg [ADDR_WIDTH-1:0] lane_addr;
 
+// 组合逻辑：根据当前输入计算cin_valid、cin_shift、addr0、addr1、addr2、addr3；本逻辑块不保存跨周期状态。
 always @(*) begin
 
     // 把合法 Cin 映射成 log2(Cin)。

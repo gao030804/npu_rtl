@@ -41,10 +41,16 @@
 `include "spi_defines.v"
 `include "timescale.v"
 
-module spi_clgen (clk_in, rst, go, enable, last_clk, divider, clk_out, pos_edge, neg_edge); 
+// [中文注释-自动补充]
+// 模块作用：SPI时钟发生器。
+// 关键变量/接口：divider为半周期分频值；go启动，enable控制SCLK翻转，last_clk标记最后一个采样边沿。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
+module spi_clgen (clk_in, rst, go, enable, last_clk, divider, clk_out, pos_edge, neg_edge);
 
   parameter Tp = 1;
-  
+
   input                            clk_in;   // input clock (system clock)
   input                            rst;      // reset
   input                            enable;   // clock enable
@@ -54,20 +60,22 @@ module spi_clgen (clk_in, rst, go, enable, last_clk, divider, clk_out, pos_edge,
   output                           clk_out;  // output clock
   output                           pos_edge; // pulse marking positive edge of clk_out
   output                           neg_edge; // pulse marking negative edge of clk_out
-                            
+
   reg                              clk_out;
   reg                              pos_edge;
   reg                              neg_edge;
-                            
-  reg       [`SPI_DIVIDER_LEN-1:0] cnt;      // clock counter 
+
+  reg       [`SPI_DIVIDER_LEN-1:0] cnt;      // clock counter
   wire                             cnt_zero; // conter is equal to zero
   wire                             cnt_one;  // conter is equal to one
-  
-  
+
+
+  // 连续赋值：组合生成cnt_zero及其相邻接口信号，表达握手、选择或地址关系。
   assign cnt_zero = cnt == {`SPI_DIVIDER_LEN{1'b0}};
   assign cnt_one  = cnt == {{`SPI_DIVIDER_LEN-1{1'b0}}, 1'b1};
-  
+
   // Counter counts half period
+  // 时序逻辑：在时钟沿更新cnt、clk_out、pos_edge、neg_edge；复位分支负责恢复确定的空闲状态。
   always @(posedge clk_in or posedge rst)
   begin
     if(rst)
@@ -80,8 +88,9 @@ module spi_clgen (clk_in, rst, go, enable, last_clk, divider, clk_out, pos_edge,
           cnt <= #Tp cnt - {{`SPI_DIVIDER_LEN-1{1'b0}}, 1'b1};
       end
   end
-  
+
   // clk_out is asserted every other half period
+  // 时序逻辑：在时钟沿更新clk_out、pos_edge、neg_edge；复位分支负责恢复确定的空闲状态。
   always @(posedge clk_in or posedge rst)
   begin
     if(rst)
@@ -89,8 +98,9 @@ module spi_clgen (clk_in, rst, go, enable, last_clk, divider, clk_out, pos_edge,
     else
       clk_out <= #Tp (enable && cnt_zero && (!last_clk || clk_out)) ? ~clk_out : clk_out;
   end
-   
+
   // Pos and neg edge signals
+  // 时序逻辑：在时钟沿更新pos_edge、neg_edge；复位分支负责恢复确定的空闲状态。
   always @(posedge clk_in or posedge rst)
   begin
     if(rst)
@@ -105,4 +115,4 @@ module spi_clgen (clk_in, rst, go, enable, last_clk, divider, clk_out, pos_edge,
       end
   end
 endmodule
- 
+

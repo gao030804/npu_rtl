@@ -15,6 +15,12 @@
 // - 下一层权重可与当前层计算并行预取；只有prefetch_done后才能切换Local SRAM A/B。
 // - 所有状态只在对应valid&&ready或done事件发生时推进，不能依赖固定Flash/SRAM延迟。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：63层Encoder层调度器。
+// 关键变量/接口：依次完成残差捕获、参数准备、权重Bank激活、卷积启动和完成等待，并预取下一层权重。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module soundstream_encoder_scheduler #(
     parameter LAST_LAYER = 6'd62
 ) (
@@ -140,30 +146,38 @@ soundstream_encoder_layer_rom u_next_rom (
     .weight_block_count          (next_weight_blocks)
 );
 
+// 连续赋值：组合生成busy及其相邻接口信号，表达握手、选择或地址关系。
 assign busy = (state != S_IDLE);
 assign start_ready = (state == S_IDLE) && first_layer_weight_ready &&
     active_weight_is_first_layer;
+// 连续赋值：组合生成capture_start及其相邻接口信号，表达握手、选择或地址关系。
 assign capture_start = (state == S_CAPTURE_START);
 assign layer_prepare_valid = (state == S_PREPARE);
+// 连续赋值：组合生成engine_start及其相邻接口信号，表达握手、选择或地址关系。
 assign engine_start = (state == S_ENGINE_START);
 assign residual_add_enable = rom_residual_add;
 
 // 8 KiB Local Bank只保存一个输出通道Tile。当前层运行时，Hierarchy可能用
 // 另一Bank处理Local miss，因此下一层首Tile在当前层完成后再装入，避免互相覆盖。
 wire prefetch_phase = (state == S_WAIT_PREFETCH);
+// 连续赋值：组合生成weight_prefetch_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign weight_prefetch_valid = prefetch_phase &&
     (physical_layer < LAST_LAYER) &&
     !prefetch_accepted;
+// 连续赋值：组合生成weight_prefetch_flash_base及其相邻接口信号，表达握手、选择或地址关系。
 assign weight_prefetch_flash_base = next_weight_base;
 assign weight_prefetch_block_count = next_weight_blocks;
 
 // physical 1进B，physical 2进A，之后交替。
+// 连续赋值：组合生成weight_prefetch_target_bank及其相邻接口信号，表达握手、选择或地址关系。
 assign weight_prefetch_target_bank = next_layer[0];
 assign weight_activate_valid = (state == S_ACTIVATE_NEXT) ||
     (state == S_RETURN_FIRST);
+// 连续赋值：组合生成weight_activate_first_layer及其相邻接口信号，表达握手、选择或地址关系。
 assign weight_activate_first_layer = (state == S_RETURN_FIRST);
 assign weight_activate_bank = next_layer[0];
 
+// 时序逻辑：在时钟沿更新state、physical_layer、current_buffer_select、prefetch_accepted、prefetch_done_seen、done；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         state                 <= S_IDLE;

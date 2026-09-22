@@ -29,6 +29,12 @@
 // - Active/Shadow权重寄存器预取下一k_group，只有当前流水完全排空后才允许swap。
 // - 最后依次执行逐Cout参数后处理、ReLU/ELU和8-Byte写回，所有级均支持反压。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：Dense/Pointwise Conv1d主控制器。
+// 关键变量/接口：循环顺序为output_group→k_group→m；权重固定后跨m复用，控制AGU、Mesh、累加和写回。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module conv1d_controller #(
     parameter ADDR_WIDTH = 32,
     parameter M_TAG_WIDTH = 9,
@@ -210,8 +216,10 @@ wire config_ok = cin_ok &&
     (k_total == calc_k_total[11:0]) &&
     (k_groups == calc_k_groups) &&
     (n_groups == calc_n_groups);
+// 连续赋值：组合生成param_rd_req_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign param_rd_req_valid    = (state == S_PARAM_REQ);
 assign param_rd_output_group = output_group;
+// 连续赋值：组合生成param_rd_rsp_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign param_rd_rsp_ready    = (state == S_PARAM_WAIT);
 
 // ── 04 激活通路：AGU产生地址，Reader管理请求、返回数据和m标签 ──────────
@@ -332,6 +340,7 @@ reg [255:0] masked_next_weight;
 integer wk;
 integer wn;
 
+// 组合逻辑：根据当前输入计算masked_weight、wk、wn、masked_next_weight、mesh_ce、ar_rsp_ready；本逻辑块不保存跨周期状态。
 always @(*) begin
 
     // 即使软件预填零，RTL 仍再次屏蔽 K-tail 和 Cout-tail，形成硬件保护。
@@ -347,6 +356,7 @@ always @(*) begin
     end
 end
 
+// 组合逻辑：根据当前输入计算masked_next_weight、wk、wn、mesh_ce、ar_rsp_ready、mesh_direct_weight_load；本逻辑块不保存跨周期状态。
 always @(*) begin
 
     // Shadow寄存器保存下一k_group，K-tail判断必须使用k_group+1。
@@ -372,6 +382,7 @@ wire                   acc_pipeline_busy;
 wire mesh_ce = !mesh_psum_valid || acc_in_ready;
 
 // Activation 只有在 Mesh 可以推进时才从 reader 中取走。
+// 连续赋值：组合生成ar_rsp_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign ar_rsp_ready = ((state == S_STREAM) || (state == S_DRAIN)) &&
     mesh_ce;
 
@@ -387,6 +398,7 @@ wire mesh_shadow_weight_load = ((state == S_STREAM) ||
     !mesh_shadow_valid && mesh_ce;
 wire mesh_weight_swap = (state == S_WAIT_ACC) && !acc_pipeline_busy &&
     have_next_k_group && mesh_shadow_valid && mesh_ce;
+// 连续赋值：组合生成weight_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign weight_ready = mesh_direct_weight_load || mesh_shadow_weight_load;
 mesh_adapter #(
     .M_TAG_WIDTH                 (M_TAG_WIDTH)
@@ -458,6 +470,7 @@ reg [M_TAG_WIDTH-1:0]       post_tag_q;
 reg                         elu_tag_valid;
 reg [M_TAG_WIDTH-1:0]       elu_tag_q;
 reg [9:0]                   post_written_count;
+// 连续赋值：组合生成acc_rd_rsp_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign acc_rd_rsp_ready = post_stream_active && post_in_ready;
 
 // ── 08 后处理：每个Cout独立Bias/Multiplier/Shift，产生INT8写回数据 ───────
@@ -479,6 +492,7 @@ postprocess_8lane u_post (
 reg [7:0] write_strb;
 reg [9:0] channels_left;
 
+// 组合逻辑：根据当前输入计算channels_left、write_strb、post_m_ext、cout_ext、write_addr、post_ready；本逻辑块不保存跨周期状态。
 always @(*) begin
 
     // 最后一个 output_group 可能不足 8 通道，按剩余 Cout 生成 byte strobe。
@@ -502,8 +516,10 @@ wire [ADDR_WIDTH-1:0] write_addr =
 
 // 后处理结果先进入 ELU。ELU 内部带 1 级弹性寄存器，因此 writer 反压会
 // 沿 elu_out_ready -> elu_in_ready -> post_ready 逐级返回，不会覆盖数据。
+// 连续赋值：组合生成post_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign post_ready         = post_stream_active && elu_in_ready;
 assign elu_out_ready      = writer_in_ready;
+// 连续赋值：组合生成elu_lut_cfg_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign elu_lut_cfg_ready  = (state == S_IDLE) && elu_lut_cfg_ready_raw;
 elu_8lane u_elu (
     .clk                         (clk),
@@ -541,6 +557,7 @@ output_writer_8lane #(
 
 // 两级m_tag弹性流水，分别镜像postprocess和ELU内部valid寄存器。
 
+// 时序逻辑：在时钟沿更新post_tag_valid、post_tag_q、elu_tag_valid、elu_tag_q、state、busy；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         post_tag_valid <= 1'b0;
@@ -562,6 +579,7 @@ always @(posedge clk or negedge rst_n) begin
     end
 end
 
+// 时序逻辑：在时钟沿更新state、busy、done、error、output_group、k_group；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         state          <= S_IDLE;

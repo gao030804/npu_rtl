@@ -15,6 +15,12 @@
 // - 最后不足8个样本时由write strobe标出有效字节；done表示最后一次写事务已经真正握手。
 // - sample_count和写地址仅在输入或输出握手成功时更新，反压不会丢失PCM样本。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：PCM帧输入与Activation写入前端。
+// 关键变量/接口：每8个PCM量化结果组成64-bit写入；末组用wr_strb标记有效byte。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module pcm16_input_frontend #(
     parameter ADDR_WIDTH = 32,
     parameter COUNT_WIDTH = 16
@@ -56,15 +62,20 @@ wire q_out_ready;
 wire signed [7:0] q_out_data;
 wire q_out_last;
 reg [63:0] pack_next;
+// 连续赋值：组合生成q_in_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign q_in_valid = busy && pcm_valid &&
     (accepted_count < sample_count_q);
+// 连续赋值：组合生成pcm_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign pcm_ready  = busy && q_in_ready &&
     (accepted_count < sample_count_q);
+// 连续赋值：组合生成q_in_last及其相邻接口信号，表达握手、选择或地址关系。
 assign q_in_last  = (accepted_count == (sample_count_q - 1'b1));
 
 // 写口发生握手的同一周期可以继续接收下一字节，不额外插入气泡。
+// 连续赋值：组合生成q_out_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign q_out_ready = busy && (!wr_valid || wr_ready);
 
+// 组合逻辑：根据当前输入计算pack_next；本逻辑块不保存跨周期状态。
 always @(*) begin
     pack_next = pack_data;
     pack_next[8*pack_count +: 8] = q_out_data;
@@ -86,6 +97,7 @@ pcm16_to_int8_quantizer u_quantizer (
     .out_last                    (q_out_last)
 );
 
+// 时序逻辑：在时钟沿更新busy、done、accepted_count、sample_count_q、next_wr_addr、pack_count；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         busy           <= 1'b0;

@@ -19,6 +19,12 @@
 // - 权重Byte地址为weight_base+(output_group*k_groups+k_group)*32。
 // - 每个地址对应一个4x8 INT8块；输出通道尾组和reduction尾组由上层mask处理。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：Dense权重地址生成器。
+// 关键变量/接口：地址=base+(output_group*k_groups+k_group)*32，每个地址对应4×8个INT8权重。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module conv1d_weight_agu #(
     parameter ADDR_WIDTH = 32
 ) (
@@ -38,5 +44,6 @@ wire [31:0] block_index      = output_group_ext * k_groups_ext
     + k_group_ext;
 
 // 左移5位等价于乘32，将256-bit块编号转换成Byte地址。
+// 连续赋值：组合生成weight_addr及其相邻接口信号，表达握手、选择或地址关系。
 assign weight_addr = weight_base + (block_index << 5);
 endmodule

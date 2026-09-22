@@ -15,6 +15,12 @@
 // - padding通过time_valid和4-bit mask实现；无效时间不贡献乘积。
 // - 八路结果分别用INT32累加，之后复用逐通道Bias/Requant和64-bit写回格式。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：Depthwise Conv1d控制器。
+// 关键变量/接口：每输出通道只与同通道卷积；当前循环按output_group→m→k_group执行并直接进行INT32累加。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module depthwise_conv1d_controller #(
     parameter ADDR_WIDTH = 32
 ) (
@@ -95,24 +101,32 @@ $signed({1'b0,cfg_left_pad});
 wire time_valid = (time_index >= 0) && (time_index < $signed({1'b0,cfg_input_length}));
 wire [9:0] channel_base = ({4'd0,og}<<3) + (half ? 10'd4 : 10'd0);
 wire [31:0] activation_offset = time_index*cfg_cin + channel_base;
+// 连续赋值：组合生成act_rd_addr0及其相邻接口信号，表达握手、选择或地址关系。
 assign act_rd_addr0 = cfg_input_base + activation_offset;
 assign act_rd_addr1 = act_rd_addr0 + 1'b1;
+// 连续赋值：组合生成act_rd_addr2及其相邻接口信号，表达握手、选择或地址关系。
 assign act_rd_addr2 = act_rd_addr0 + 2'd2;
 assign act_rd_addr3 = act_rd_addr0 + 2'd3;
+// 连续赋值：组合生成act_rd_mask及其相邻接口信号，表达握手、选择或地址关系。
 assign act_rd_mask[0] = time_valid && (channel_base     < cfg_cout);
 assign act_rd_mask[1] = time_valid && (channel_base+1  < cfg_cout);
+// 连续赋值：组合生成act_rd_mask及其相邻接口信号，表达握手、选择或地址关系。
 assign act_rd_mask[2] = time_valid && (channel_base+2  < cfg_cout);
 assign act_rd_mask[3] = time_valid && (channel_base+3  < cfg_cout);
+// 连续赋值：组合生成act_rd_req_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign act_rd_req_valid = (state==S_ACT_REQ);
 assign act_rd_rsp_ready = (state==S_ACT_WAIT);
 
 // 每个256-bit权重块保存4个kernel tap、8个输出通道：
 // weight[8*(tap*8+output_lane) +: 8]。
 wire [31:0] block_number = og*cfg_k_groups + kg;
+// 连续赋值：组合生成wgt_rd_addr及其相邻接口信号，表达握手、选择或地址关系。
 assign wgt_rd_addr = cfg_weight_base + (block_number<<5);
 assign wgt_rd_req_valid = (state==S_W_REQ);
+// 连续赋值：组合生成wgt_rd_rsp_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign wgt_rd_rsp_ready = (state==S_W_WAIT);
 assign param_rd_req_valid = (state==S_PARAM_REQ);
+// 连续赋值：组合生成param_rd_rsp_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign param_rd_rsp_ready = (state==S_PARAM_WAIT);
 assign param_rd_output_group = og;
 wire [255:0] acc_bus={acc7,acc6,acc5,acc4,acc3,acc2,acc1,acc0};
@@ -140,6 +154,7 @@ integer n;
 reg [63:0] activated_data;
 reg [7:0] write_strobe;
 
+// 组合逻辑：根据当前输入计算activated_data、write_strobe、n、post_ready、write_offset；本逻辑块不保存跨周期状态。
 always @(*) begin
     activated_data=post_data;
     write_strobe=0;
@@ -150,6 +165,7 @@ always @(*) begin
 end
 
 wire writer_in_ready;
+// 连续赋值：组合生成post_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign post_ready=writer_in_ready;
 wire [31:0] write_offset=m*cfg_cout+({26'd0,og}<<3);
 
@@ -176,6 +192,7 @@ output_writer_8lane #(.ADDR_WIDTH(ADDR_WIDTH)) u_writer (
 // 循环次序：output_group -> output_time(m) -> kernel_group -> tap -> half。
 // half=0读取当前8通道的低4通道；half=1读取高4通道。
 // 每个请求状态与等待响应状态分开，确保SRAM任意延迟和反压下不丢数据。
+// 时序逻辑：在时钟沿更新state、busy、done、error、og、m；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if(!rst_n) begin
         state<=S_IDLE;

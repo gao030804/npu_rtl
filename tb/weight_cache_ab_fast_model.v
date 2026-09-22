@@ -7,6 +7,12 @@
 // 真实SPI时序由tb_weight_cache_ab单独验证；完整帧testbench根据block数量
 // 换算25 MHz单线SPI的理论周期，并与实际卷积周期比较。
 //=============================================================================
+// [中文注释-自动补充]
+// 模块作用：完整帧仿真的快速Weight Cache模型。
+// 关键变量/接口：跳过串行Flash引脚时序，但保留预取、Bank切换、地址范围和256-bit读响应协议。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module weight_cache_ab_fast_model #(
     parameter MEMORY_BYTES = 934016
 ) (
@@ -66,19 +72,25 @@ wire request_in_range = (req_addr >= {8'd0,selected_base}) &&
                         (req_addr[4:0] == 5'd0) &&
                         ((req_addr + 31) < MEMORY_BYTES);
 
+// 连续赋值：组合生成req_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign req_ready = selected_valid && !read_pending && !rsp_valid;
 assign prefetch_ready = !prefetch_pending &&
                         (active_first_layer ||
                          (prefetch_target_bank != active_bank));
+// 连续赋值：组合生成activate_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign activate_ready = activate_first_layer ? 1'b1 :
                         (activate_bank ? bank_valid_b : bank_valid_a);
+// 连续赋值：组合生成active_bank_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign active_bank_valid = selected_valid;
 assign first_layer_ready = 1'b1;
+// 连续赋值：组合生成cache_busy及其相邻接口信号，表达握手、选择或地址关系。
 assign cache_busy = prefetch_pending;
 assign flash_csn = 1'b1;
+// 连续赋值：组合生成flash_sclk及其相邻接口信号，表达握手、选择或地址关系。
 assign flash_sclk = 1'b0;
 assign flash_mosi = 1'b0;
 
+// 时序逻辑：在时钟沿更新rsp_valid、rsp_data、read_pending、read_addr_q、prefetch_pending、prefetch_done；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         rsp_valid <= 1'b0;

@@ -31,6 +31,12 @@
 // - 请求地址先判断First Layer常驻区或Local命中，未命中时暂停响应并启动Global到Local复制。
 // - Global、Local A和Local B活动信号可用于后续SRAM时钟门控和功耗统计。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：Encoder四级权重存储控制。
+// 关键变量/接口：Flash→Global SRAM→Local SRAM A/B→Mesh寄存器；A/B用于当前层计算和下一层预取重叠。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module encoder_weight_hierarchy #(
     parameter GLOBAL_DEPTH_BLOCKS      = 8192,  // 8192 x 32 Byte = 256 KiB
     parameter GLOBAL_INDEX_WIDTH       = 13,
@@ -132,6 +138,7 @@ wire [GLOBAL_INDEX_WIDTH-1:0] global_addr = global_dma_write ?
     (copy_global_base_block + copy_index[GLOBAL_INDEX_WIDTH-1:0]);
 wire [255:0] global_rdata;
 wire         global_rvalid;
+// 连续赋值：组合生成dma_block_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign dma_block_ready = (control_state == C_BOOT_WAIT) &&
     (dma_block_index < GLOBAL_MODEL_BLOCKS);
 opentitan_sram_1p_adapter #(
@@ -268,6 +275,7 @@ wire prefetch_command_valid = (prefetch_block_count != 0) &&
 wire [15:0] prefetch_local_blocks =
     (prefetch_block_count > LOCAL_DEPTH_BLOCKS) ?
     LOCAL_DEPTH_BLOCKS : prefetch_block_count;
+// 连续赋值：组合生成req_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign req_ready = selected_bank_valid && request_in_range &&
     !rsp_valid && !read_pending &&
     ((control_state == C_IDLE) ||
@@ -275,16 +283,21 @@ assign req_ready = selected_bank_valid && request_in_range &&
     control_state == C_PREFETCH_WAIT) &&
     (active_first_layer ||
     (active_bank != copy_target_bank))));
+// 连续赋值：组合生成prefetch_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign prefetch_ready = prefetch_armed && (control_state == C_IDLE) &&
     !rsp_valid && !read_pending;
+// 连续赋值：组合生成activate_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign activate_ready = (control_state == C_IDLE) && !rsp_valid &&
     !read_pending &&
     (activate_first_layer ? first_layer_ready :
     (activate_bank ? bank_valid_b : bank_valid_a));
+// 连续赋值：组合生成active_bank_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign active_bank_valid = selected_bank_valid;
 assign hierarchy_busy = (control_state != C_IDLE) || dma_busy || dma_cmd_valid;
+// 连续赋值：组合生成global_sram_active及其相邻接口信号，表达握手、选择或地址关系。
 assign global_sram_active = global_dma_write || global_copy_read;
 assign local_sram_a_active = bank_a_sram_write || bank_a_sram_read;
+// 连续赋值：组合生成local_sram_b_active及其相邻接口信号，表达握手、选择或地址关系。
 assign local_sram_b_active = bank_b_sram_write || bank_b_sram_read;
 qspi_weight_boot_loader #(
     .QSPI_HALF_DIV               (QSPI_HALF_DIV),
@@ -309,6 +322,7 @@ qspi_weight_boot_loader #(
     .flash_dq                    ({flash_hold, flash_wp, flash_miso, flash_mosi})
 );
 
+// 时序逻辑：在时钟沿更新control_state、dma_cmd_valid、copy_index、copy_global_base_block、copy_block_count、copy_target_bank；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         control_state        <= C_BOOT_LAUNCH;

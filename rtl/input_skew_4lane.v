@@ -17,6 +17,12 @@
 // - 第0/1/2/3路分别延迟0/1/2/3个有效ce周期，使数据沿脉动阵列对角线进入。
 // - ce=0时数据和valid必须同时冻结，不能把墙钟周期误当作阵列推进周期。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：4路激活错拍器。
+// 关键变量/接口：lane0~3依次延迟0~3拍，使同一k_group的4个激活沿阵列对角线到达PE。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module input_skew_4lane #(
     parameter M_TAG_WIDTH = 9,
     parameter DELAY0 = 0,
@@ -48,10 +54,13 @@ reg [M_TAG_WIDTH-1:0] t1 [0:DELAY1];
 reg [M_TAG_WIDTH-1:0] t2 [0:DELAY2];
 reg [M_TAG_WIDTH-1:0] t3 [0:DELAY3];
 integer i;
+// 连续赋值：组合生成out_data及其相邻接口信号，表达握手、选择或地址关系。
 assign out_data = {d3[DELAY3], d2[DELAY2], d1[DELAY1], d0[DELAY0]};
 assign out_valid = {v3[DELAY3], v2[DELAY2], v1[DELAY1], v0[DELAY0]};
+// 连续赋值：组合生成out_m_tag及其相邻接口信号，表达握手、选择或地址关系。
 assign out_m_tag = {t3[DELAY3], t2[DELAY2], t1[DELAY1], t0[DELAY0]};
 
+// 时序逻辑：在时钟沿更新i；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
 

@@ -24,6 +24,12 @@
 // - 内部命令/响应缓冲允许多个请求在途；reserved计数包含已发出但尚未返回的请求。
 // - 下游停顿时rsp_valid、rsp_data和rsp_m_tag保持稳定，形成完整反压链。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：四路激活SRAM读取流水。
+// 关键变量/接口：保存请求tag并跟踪未返回事务；rsp_valid等待rsp_ready时数据必须保持稳定。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module activation_reader_4lane #(
     parameter ADDR_WIDTH  = 32,
     parameter M_TAG_WIDTH = 9,
@@ -70,18 +76,24 @@ wire out_pop  = rsp_valid && rsp_ready;
 wire meta_pop = act_rd_rsp_valid && act_rd_rsp_ready;
 wire out_has_space  = (out_count < FIFO_DEPTH) || out_pop;
 wire meta_has_space = (meta_count < FIFO_DEPTH) || meta_pop;
+// 连续赋值：组合生成act_rd_req_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign act_rd_req_valid = cmd_valid && meta_has_space;
 assign cmd_ready        = act_rd_req_ready && meta_has_space;
+// 连续赋值：组合生成act_rd_addr0及其相邻接口信号，表达握手、选择或地址关系。
 assign act_rd_addr0     = cmd_addr0;
 assign act_rd_addr1     = cmd_addr1;
+// 连续赋值：组合生成act_rd_addr2及其相邻接口信号，表达握手、选择或地址关系。
 assign act_rd_addr2     = cmd_addr2;
 assign act_rd_addr3     = cmd_addr3;
+// 连续赋值：组合生成act_rd_mask及其相邻接口信号，表达握手、选择或地址关系。
 assign act_rd_mask      = cmd_mask;
 wire req_fire = act_rd_req_valid && act_rd_req_ready;
 
 // SRAM 必须按请求顺序返回；没有对应元数据时不接受孤立响应。
+// 连续赋值：组合生成act_rd_rsp_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign act_rd_rsp_ready = (meta_count != 0) && out_has_space;
 assign rsp_valid = (out_count != 0);
+// 连续赋值：组合生成rsp_data及其相邻接口信号，表达握手、选择或地址关系。
 assign rsp_data  = out_data[out_rd_ptr];
 assign rsp_m_tag = out_tag[out_rd_ptr];
 wire [31:0] masked_rsp_data = {
@@ -91,6 +103,7 @@ meta_mask[meta_rd_ptr][1] ? act_rd_data[15:8]  : 8'd0,
 meta_mask[meta_rd_ptr][0] ? act_rd_data[7:0]   : 8'd0
 };
 
+// 时序逻辑：在时钟沿更新meta_wr_ptr、meta_rd_ptr、meta_count、out_wr_ptr、out_rd_ptr、out_count；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         meta_wr_ptr <= {PTR_WIDTH{1'b0}};

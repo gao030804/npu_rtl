@@ -16,6 +16,12 @@
 // - Activation、Weight、Parameter和Output接口均进行双向valid/ready选择，未选路径不能消费响应。
 // - Dense路径覆盖普通卷积及所有低秩1x1卷积；Depthwise路径禁止跨输入通道规约。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：Dense/Depthwise卷积引擎选择层。
+// 关键变量/接口：cfg_is_depthwise选择控制器；未选路径的ready/valid被隔离，外部接口保持统一。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module conv1d_engine_top #(
     parameter ADDR_WIDTH=32, parameter M_TAG_WIDTH=9, parameter MAX_M=320
 ) (
@@ -74,6 +80,7 @@ reg select_dw;
 
 // 只在引擎空闲并接受start时锁存模式。这样即使外部控制器提前更新下一层
 // cfg_is_depthwise，也不会让正在执行的层从Dense通路跳到Depthwise通路。
+// 时序逻辑：在时钟沿更新select_dw；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n)
 if(!rst_n) select_dw<=1'b0;
 else if(start&&!busy) select_dw<=cfg_is_depthwise;
@@ -98,24 +105,34 @@ wire [7:0] dwos;
 // select_dw=0：请求和响应连接4×8脉动阵列控制器。
 // select_dw=1：请求和响应连接专用Depthwise控制器。
 // ready/valid也必须同时选择，不能只复用data，否则未选中的控制器会误计数。
+// 连续赋值：组合生成busy及其相邻接口信号，表达握手、选择或地址关系。
 assign busy=select_dw?dwbusy:dbusy;
 assign done=select_dw?dwdone:ddone;
+// 连续赋值：组合生成error及其相邻接口信号，表达握手、选择或地址关系。
 assign error=select_dw?dwerror:derror;
 assign act_rd_req_valid=select_dw?dw_actv:dav;
+// 连续赋值：组合生成act_rd_addr0及其相邻接口信号，表达握手、选择或地址关系。
 assign act_rd_addr0=select_dw?dwa0:da0;
 assign act_rd_addr1=select_dw?dwa1:da1;
+// 连续赋值：组合生成act_rd_addr2及其相邻接口信号，表达握手、选择或地址关系。
 assign act_rd_addr2=select_dw?dwa2:da2;
 assign act_rd_addr3=select_dw?dwa3:da3;
+// 连续赋值：组合生成act_rd_mask及其相邻接口信号，表达握手、选择或地址关系。
 assign act_rd_mask=select_dw?dwam:dam;
 assign act_rd_rsp_ready=select_dw?dwarr:darr;
+// 连续赋值：组合生成wgt_rd_req_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign wgt_rd_req_valid=select_dw?dw_wgtv:dwv;
 assign wgt_rd_addr=select_dw?dwwa:dwa;
+// 连续赋值：组合生成wgt_rd_rsp_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign wgt_rd_rsp_ready=select_dw?dwrspready:dense_w_rsp_ready;
 assign param_rd_req_valid=select_dw?dwpv:dpv;
+// 连续赋值：组合生成param_rd_output_group及其相邻接口信号，表达握手、选择或地址关系。
 assign param_rd_output_group=select_dw?dwpog:dpog;
 assign param_rd_rsp_ready=select_dw?dwprspready:dprspready;
+// 连续赋值：组合生成out_wr_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign out_wr_valid=select_dw?dwov:dov;
 assign out_wr_addr=select_dw?dwoa:doa;
+// 连续赋值：组合生成out_wr_data及其相邻接口信号，表达握手、选择或地址关系。
 assign out_wr_data=select_dw?dwod:dod;
 assign out_wr_strb=select_dw?dwos:dos;
 

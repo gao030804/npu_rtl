@@ -23,6 +23,12 @@
 // - 每列对应一个输出通道；每行对应当前k_group中的一个reduction lane。
 // - ce统一控制数据、valid和tag流水，保证反压时所有信号停在相同计算位置。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：4×8 Mesh核心。
+// 关键变量/接口：保存Active/Shadow两套256-bit权重寄存器；ce同时冻结数据、valid和tag流水。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module mesh_core_4x8_systolic #(
     parameter M_TAG_WIDTH = 9
 ) (
@@ -65,6 +71,7 @@ wire [159:0] raw_psum;
 wire [7:0] raw_valid;
 wire [8*M_TAG_WIDTH-1:0] raw_tag;
 
+// 时序逻辑：在时钟沿更新weight_q、weight_shadow_q、valid_pipe；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         weight_q  <= 256'd0;
@@ -126,20 +133,28 @@ Systolic_Array #(
 );
 
 // 第n列的最终部分和相对输入向量延迟4+n拍。
+// 连续赋值：组合生成raw_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign raw_valid[0] = valid_pipe[RAW_DELAY0];
 assign raw_valid[1] = valid_pipe[RAW_DELAY1];
+// 连续赋值：组合生成raw_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign raw_valid[2] = valid_pipe[RAW_DELAY2];
 assign raw_valid[3] = valid_pipe[RAW_DELAY3];
+// 连续赋值：组合生成raw_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign raw_valid[4] = valid_pipe[RAW_DELAY4];
 assign raw_valid[5] = valid_pipe[RAW_DELAY5];
+// 连续赋值：组合生成raw_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign raw_valid[6] = valid_pipe[RAW_DELAY6];
 assign raw_valid[7] = valid_pipe[RAW_DELAY7];
+// 连续赋值：组合生成raw_tag及其相邻接口信号，表达握手、选择或地址关系。
 assign raw_tag[M_TAG_WIDTH-1:0] = tag_pipe[RAW_DELAY0];
 assign raw_tag[2*M_TAG_WIDTH-1:M_TAG_WIDTH] = tag_pipe[RAW_DELAY1];
+// 连续赋值：组合生成raw_tag及其相邻接口信号，表达握手、选择或地址关系。
 assign raw_tag[3*M_TAG_WIDTH-1:2*M_TAG_WIDTH] = tag_pipe[RAW_DELAY2];
 assign raw_tag[4*M_TAG_WIDTH-1:3*M_TAG_WIDTH] = tag_pipe[RAW_DELAY3];
+// 连续赋值：组合生成raw_tag及其相邻接口信号，表达握手、选择或地址关系。
 assign raw_tag[5*M_TAG_WIDTH-1:4*M_TAG_WIDTH] = tag_pipe[RAW_DELAY4];
 assign raw_tag[6*M_TAG_WIDTH-1:5*M_TAG_WIDTH] = tag_pipe[RAW_DELAY5];
+// 连续赋值：组合生成raw_tag及其相邻接口信号，表达握手、选择或地址关系。
 assign raw_tag[7*M_TAG_WIDTH-1:6*M_TAG_WIDTH] = tag_pipe[RAW_DELAY6];
 assign raw_tag[8*M_TAG_WIDTH-1:7*M_TAG_WIDTH] = tag_pipe[RAW_DELAY7];
 output_deskew_8lane #(

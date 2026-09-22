@@ -35,6 +35,12 @@
 // - relu_enable优先于elu_enable；ReLU把负数置0，ELU按abs(x)-1形成LUT地址。
 // - 配置LUT时数据通路必须空闲，避免计算过程中修改查表内容。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：八路ReLU/ELU激活单元。
+// 关键变量/接口：ReLU将负数置零；ELU负半轴查询128项LUT；输出遵守valid/ready反压。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module elu_8lane (
     input                                       clk,
     input                                       rst_n,
@@ -107,13 +113,16 @@ lane1[7] ? 8'd0 : lane1, lane0[7] ? 8'd0 : lane0
 };
 
 // 一项输出缓冲：空闲或本拍即将被下游接收时，可以接收新输入。
+// 连续赋值：组合生成in_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign in_ready  = !out_valid || out_ready;
 
 // 禁止配置写和数据处理重叠，避免查表时修改LUT内容。
+// 连续赋值：组合生成cfg_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign cfg_ready = !in_valid && !out_valid;
 
 // 配置写入广播到8份LUT，保证所有lane使用相同映射关系。
 
+// 时序逻辑：在时钟沿更新out_valid、out_data；复位分支负责恢复确定的空闲状态。
 always @(posedge clk) begin
     if (cfg_valid && cfg_ready) begin
         lut0[cfg_addr] <= cfg_wdata;
@@ -129,6 +138,7 @@ end
 
 // ELU数据流水。发生反压时out_valid和out_data均保持不变。
 
+// 时序逻辑：在时钟沿更新out_valid、out_data；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         out_valid <= 1'b0;

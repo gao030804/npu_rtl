@@ -17,6 +17,12 @@
 // - 补偿8个输出列不同的阵列延迟，使同一m_tag的8路INT20部分和同时输出。
 // - valid和tag必须经过与数据完全相同的ce延迟链，否则会写入错误的m地址。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：8路部分和对齐器。
+// 关键变量/接口：补偿各列传播延迟，使同一m_tag的8路INT20部分和同周期送入Accumulator。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module output_deskew_8lane #(
     parameter M_TAG_WIDTH = 9,
     parameter D0 = 7,
@@ -64,16 +70,20 @@ reg [M_TAG_WIDTH-1:0] t5 [0:D5];
 reg [M_TAG_WIDTH-1:0] t6 [0:D6];
 reg [M_TAG_WIDTH-1:0] t7 [0:D7];
 integer i;
+// 连续赋值：组合生成out_data及其相邻接口信号，表达握手、选择或地址关系。
 assign out_data = {
 q7[D7], q6[D6], q5[D5], q4[D4],
 q3[D3], q2[D2], q1[D1], q0[D0]
 };
+// 连续赋值：组合生成out_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign out_valid = v0[D0] & v1[D1] & v2[D2] & v3[D3] &
     v4[D4] & v5[D5] & v6[D6] & v7[D7];
 
 // 对齐完成后各列 tag 应相同，因此选择 lane0 的 tag 作为公共输出 tag。
+// 连续赋值：组合生成out_m_tag及其相邻接口信号，表达握手、选择或地址关系。
 assign out_m_tag = t0[D0];
 
+// 时序逻辑：在时钟沿更新i；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
 

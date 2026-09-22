@@ -6,6 +6,12 @@
 // NPU读取当前active source，Flash DMA写下一层inactive bank，实现计算/加载重叠。
 //=============================================================================
 
+// [中文注释-自动补充]
+// 模块作用：SPI到片内Weight SRAM A/B缓存。
+// 关键变量/接口：prefetch装载非活动Bank，activate在层边界切换；req/rsp向计算侧提供256-bit权重块。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module weight_cache_ab #(
     parameter CACHE_BLOCKS = 4096,
     parameter CACHE_INDEX_WIDTH = 12,
@@ -134,18 +140,23 @@ wire selected_read_rvalid = read_source_first_q ? first_sram_rvalid :
     (read_bank_q ? bank_b_sram_rvalid : bank_a_sram_rvalid);
 wire [255:0] selected_read_data = read_source_first_q ? first_sram_rdata :
     (read_bank_q ? bank_b_sram_rdata : bank_a_sram_rdata);
+// 连续赋值：组合生成active_bank_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign active_bank_valid = selected_bank_valid;
 
 // 预取非活动Bank时仍允许NPU读取活动Bank，形成真正的计算/加载重叠。
+// 连续赋值：组合生成req_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign req_ready = selected_bank_valid && !rsp_valid && !read_pending &&
     !load_conflicts_active;
+// 连续赋值：组合生成prefetch_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign prefetch_ready = prefetch_armed && (control_state == C_IDLE) &&
     (active_first_layer ||
     !selected_bank_valid ||
     (prefetch_target_bank != active_bank));
+// 连续赋值：组合生成activate_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign activate_ready = (control_state == C_IDLE) && !rsp_valid && !read_pending &&
     (activate_first_layer ? first_layer_valid :
     (activate_bank ? bank_valid_b : bank_valid_a));
+// 连续赋值：组合生成cache_busy及其相邻接口信号，表达握手、选择或地址关系。
 assign cache_busy = (control_state != C_IDLE) || dma_busy || dma_cmd_valid;
 assign dma_block_ready = (load_target == TARGET_FIRST) ?
     (dma_block_index < FIRST_LAYER_BLOCKS) :
@@ -223,6 +234,7 @@ flash_weight_burst_loader #(
     .flash_miso                  (flash_miso)
 );
 
+// 时序逻辑：在时钟沿更新control_state、boot_load、load_target、load_base_q、load_count_q、dma_cmd_valid；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         control_state     <= C_BOOT_LAUNCH;

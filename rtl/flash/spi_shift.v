@@ -41,13 +41,19 @@
 `include "spi_defines.v"
 `include "timescale.v"
 
+// [中文注释-自动补充]
+// 模块作用：SPI串并转换器。
+// 关键变量/接口：tx_data为待发送字，rx_data为接收字；tip表示传输进行中，pos_edge/neg_edge决定移位或采样时刻。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module spi_shift (clk, rst, latch, byte_sel, len, lsb, go,
                   pos_edge, neg_edge, rx_negedge, tx_negedge,
-                  tip, last, 
+                  tip, last,
                   p_in, p_out, s_clk, s_in, s_out);
 
   parameter Tp = 1;
-  
+
   input                          clk;          // system clock
   input                          rst;          // reset
   input                    [3:0] latch;        // latch signal for storing the data in shift register
@@ -57,7 +63,7 @@ module spi_shift (clk, rst, latch, byte_sel, len, lsb, go,
   input                          go;           // start stansfer
   input                          pos_edge;     // recognize posedge of sclk
   input                          neg_edge;     // recognize negedge of sclk
-  input                          rx_negedge;   // s_in is sampled on negative edge 
+  input                          rx_negedge;   // s_in is sampled on negative edge
   input                          tx_negedge;   // s_out is driven on negative edge
   output                         tip;          // transfer in progress
   output                         last;         // last bit
@@ -66,10 +72,10 @@ module spi_shift (clk, rst, latch, byte_sel, len, lsb, go,
   input                          s_clk;        // serial clock
   input                          s_in;         // serial in
   output                         s_out;        // serial out
-                                               
-  reg                            s_out;        
+
+  reg                            s_out;
   reg                            tip;
-                              
+
   reg     [`SPI_CHAR_LEN_BITS:0] cnt;          // data bit count
   reg        [`SPI_MAX_CHAR-1:0] data;         // shift register
   wire    [`SPI_CHAR_LEN_BITS:0] tx_bit_pos;   // next bit position
@@ -77,28 +83,34 @@ module spi_shift (clk, rst, latch, byte_sel, len, lsb, go,
   wire    [`SPI_CHAR_LEN_BITS:0] first_tx_bit_pos; // first bit of a new transfer
   wire                           rx_clk;       // rx clock enable
   wire                           tx_clk;       // tx clock enable
-  
+
+  // 连续赋值：组合生成p_out及其相邻接口信号，表达握手、选择或地址关系。
   assign p_out = data;
-  
+
+  // 连续赋值：组合生成tx_bit_pos及其相邻接口信号，表达握手、选择或地址关系。
   assign tx_bit_pos = lsb ? {!(|len), len} - cnt : cnt - {{`SPI_CHAR_LEN_BITS{1'b0}},1'b1};
-  assign rx_bit_pos = lsb ? {!(|len), len} - (rx_negedge ? cnt + {{`SPI_CHAR_LEN_BITS{1'b0}},1'b1} : cnt) : 
+  assign rx_bit_pos = lsb ? {!(|len), len} - (rx_negedge ? cnt + {{`SPI_CHAR_LEN_BITS{1'b0}},1'b1} : cnt) :
                             (rx_negedge ? cnt : cnt - {{`SPI_CHAR_LEN_BITS{1'b0}},1'b1});
 
   // len=0在该SPI核中表示SPI_MAX_CHAR位。空闲期间cnt仍可能保留上一笔
   // 传输的长度；如果直接用tx_bit_pos预装MOSI，新命令首位可能来自上一笔
   // RX数据。例如第三次FAST READ的0x0B会被污染成0x8B。
   // 因此go启动新传输时必须根据当前len重新选择真正的第一位。
+  // 连续赋值：组合生成first_tx_bit_pos及其相邻接口信号，表达握手、选择或地址关系。
   assign first_tx_bit_pos = lsb ?
                             {(`SPI_CHAR_LEN_BITS+1){1'b0}} :
                             ((!(|len)) ? (`SPI_MAX_CHAR-1) :
                              ({1'b0, len} - {{`SPI_CHAR_LEN_BITS{1'b0}},1'b1}));
-  
+
+  // 连续赋值：组合生成last及其相邻接口信号，表达握手、选择或地址关系。
   assign last = !(|cnt);
-  
+
+  // 连续赋值：组合生成rx_clk及其相邻接口信号，表达握手、选择或地址关系。
   assign rx_clk = (rx_negedge ? neg_edge : pos_edge) && (!last || s_clk);
   assign tx_clk = (tx_negedge ? neg_edge : pos_edge) && !last;
-  
+
   // Character bit counter
+  // 时序逻辑：在时钟沿更新cnt、tip、s_out、data；复位分支负责恢复确定的空闲状态。
   always @(posedge clk or posedge rst)
   begin
     if(rst)
@@ -111,8 +123,9 @@ module spi_shift (clk, rst, latch, byte_sel, len, lsb, go,
           cnt <= #Tp !(|len) ? {1'b1, {`SPI_CHAR_LEN_BITS{1'b0}}} : {1'b0, len};
       end
   end
-  
+
   // Transfer in progress
+  // 时序逻辑：在时钟沿更新tip、s_out、data；复位分支负责恢复确定的空闲状态。
   always @(posedge clk or posedge rst)
   begin
     if(rst)
@@ -122,8 +135,9 @@ module spi_shift (clk, rst, latch, byte_sel, len, lsb, go,
   else if(tip && last && pos_edge)
     tip <= #Tp 1'b0;
   end
-  
+
   // Sending bits to the line
+  // 时序逻辑：在时钟沿更新s_out、data；复位分支负责恢复确定的空闲状态。
   always @(posedge clk or posedge rst)
   begin
     if (rst)
@@ -133,8 +147,9 @@ module spi_shift (clk, rst, latch, byte_sel, len, lsb, go,
     else
       s_out <= #Tp (tx_clk || !tip) ? data[tx_bit_pos[`SPI_CHAR_LEN_BITS-1:0]] : s_out;
   end
-  
+
   // Receiving bits from the line
+  // 时序逻辑：在时钟沿更新data；复位分支负责恢复确定的空闲状态。
   always @(posedge clk or posedge rst)
   begin
     if (rst)
@@ -245,5 +260,5 @@ module spi_shift (clk, rst, latch, byte_sel, len, lsb, go,
     else
       data[rx_bit_pos[`SPI_CHAR_LEN_BITS-1:0]] <= #Tp rx_clk ? s_in : data[rx_bit_pos[`SPI_CHAR_LEN_BITS-1:0]];
   end
-  
+
 endmodule
