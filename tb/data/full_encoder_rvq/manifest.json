@@ -3,7 +3,22 @@
   "activation_comparisons": 139136,
   "weight_bytes": 162688,
   "latent_bytes": 64,
-  "expected_indices": "0x0a09080706050403",
+  "projection": "64x32 identity-select test matrix",
+  "rvq_stages": 9,
+  "rvq_codebook_sizes": [
+    256,
+    128,
+    128,
+    128,
+    128,
+    128,
+    128,
+    128,
+    128
+  ],
+  "rvq_lookup_dim": 32,
+  "rvq_codebook_bytes_int8": 40960,
+  "expected_indices": "0x16284880e1828403",
   "layer_table": [
     {
       "physical": 0,

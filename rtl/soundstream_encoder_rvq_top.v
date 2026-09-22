@@ -2,7 +2,7 @@
 
 //=============================================================================
 // 模块：soundstream_encoder_rvq_top
-// 功能：PCM16 -> INT8 -> 多层Conv1d Encoder -> 1x64 latent -> 8级RVQ。
+// 功能：PCM16 -> INT8 -> Encoder 64D -> Projection-In 32D -> 9级非均匀RVQ。
 //
 // 一帧控制顺序：
 //   C_IDLE       等待码本/Scale配置完成并接受frame_start；
@@ -17,9 +17,15 @@
 // -------------------------------------------------------------------------
 // 详细阅读说明：
 // - 系统帧级入口。frame_start只在frame_start_ready=1时接受；一帧执行期间frame_busy保持为1。
-// - 数据顺序为PCM采集、Encoder等待权重、63层卷积、分8组读取64维latent、启动8级RVQ、输出64-bit索引。
+// - 数据顺序为PCM采集、63层卷积、读取64D latent、64→32投影、启动9级RVQ、输出64-bit索引。
 // - encoded_valid受encoded_ready反压；等待期间encoded_indices必须保持不变。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：PCM到Encoder再到RVQ的整帧顶层。
+// 关键变量/接口：控制320点PCM采集、63层卷积、64维latent读取、8组RVQ输入和64-bit索引输出。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module soundstream_encoder_rvq_top #(
     parameter ADDR_WIDTH                  = 32,
     parameter PCM_SAMPLES_PER_FRAME       = 320,
@@ -68,10 +74,18 @@ module soundstream_encoder_rvq_top #(
     input              [47:0]                   param_shift_data,
     input              [63:0]                   param_zero_point_data,
 
-    // RVQ部署配置：8级Scale和128 KiB码本应在rvq_config_done前写完。
+    // Projection-In部署配置：32x64 INT8权重，共256个64-bit word。
+    input                                       projection_wr_valid,
+    output                                      projection_wr_ready,
+    input              [7:0]                    projection_wr_addr,
+    input              [63:0]                   projection_wr_data,
+    input       signed [31:0]                   projection_multiplier,
+    input              [5:0]                    projection_shift,
+
+    // RVQ部署配置：9级Scale和40 KiB紧凑码本应在rvq_config_done前写完。
     input                                       rvq_scale_cfg_valid,
     output                                      rvq_scale_cfg_ready,
-    input              [2:0]                    rvq_scale_cfg_stage,
+    input              [3:0]                    rvq_scale_cfg_stage,
     input              [31:0]                   rvq_scale_cfg_multiplier,
     input              [5:0]                    rvq_scale_cfg_shift,
     input                                       rvq_codebook_wr_valid,
@@ -162,8 +176,16 @@ wire rvq_busy;
 wire rvq_error;
 wire rvq_scale_cfg_ready_core;
 wire rvq_codebook_wr_ready_core;
-wire rvq_latent_valid = (state == C_RVQ_SEND);
-wire rvq_latent_last = (latent_group == 3'd7);
+wire projection_in_ready;
+wire projection_out_valid;
+wire [63:0] projection_out_data;
+wire projection_out_last;
+wire projection_busy;
+wire projection_error;
+wire projection_wr_ready_core;
+wire projection_in_valid = (state == C_RVQ_SEND);
+wire rvq_latent_valid = projection_out_valid;
+wire rvq_latent_last = projection_out_last;
 wire layer_write_fire_unused;
 wire [ADDR_WIDTH-1:0] layer_write_addr_unused;
 wire [63:0] layer_write_data_unused;
@@ -175,14 +197,19 @@ wire perf_prefetch_fire_unused;
 wire perf_prefetch_done_unused;
 wire [23:0] perf_prefetch_base_unused;
 wire [15:0] perf_prefetch_blocks_unused;
+// 连续赋值：组合生成frame_start_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign frame_start_ready = (state == C_IDLE) && rvq_configured;
 assign frame_busy = (state != C_IDLE);
 
 // 配置只允许在帧空闲期修改，防止搜索过程中码本或Scale发生变化。
+// 连续赋值：组合生成rvq_scale_cfg_ready及其相邻接口信号，表达握手、选择或地址关系。
 assign rvq_scale_cfg_ready = (state == C_IDLE) && rvq_scale_cfg_ready_core;
 assign rvq_codebook_wr_ready = (state == C_IDLE) && rvq_codebook_wr_ready_core;
+assign projection_wr_ready = (state == C_IDLE) && projection_wr_ready_core;
+// 连续赋值：组合生成encoded_valid及其相邻接口信号，表达握手、选择或地址关系。
 assign encoded_valid = (state == C_RVQ_WAIT) && rvq_result_valid;
 assign encoded_indices = rvq_result_indices;
+// 连续赋值：组合生成control_state_debug及其相邻接口信号，表达握手、选择或地址关系。
 assign control_state_debug = state;
 assign latent_group_debug = latent_group;
 pcm16_input_frontend #(
@@ -296,6 +323,27 @@ soundstream_encoder_top #(
     .octal_rx_error              (octal_rx_error)
 );
 
+rvq_projection_64to32 u_projection_in (
+    .clk                         (clk),
+    .rst_n                       (rst_n),
+    .weight_wr_valid             (projection_wr_valid && (state == C_IDLE)),
+    .weight_wr_ready             (projection_wr_ready_core),
+    .weight_wr_addr              (projection_wr_addr),
+    .weight_wr_data              (projection_wr_data),
+    .requant_multiplier          (projection_multiplier),
+    .requant_shift               (projection_shift),
+    .in_valid                    (projection_in_valid),
+    .in_ready                    (projection_in_ready),
+    .in_data                     (latent_word),
+    .in_last                     (latent_group == 3'd7),
+    .out_valid                   (projection_out_valid),
+    .out_ready                   (rvq_latent_ready),
+    .out_data                    (projection_out_data),
+    .out_last                    (projection_out_last),
+    .busy                        (projection_busy),
+    .error                       (projection_error)
+);
+
 rvq_core u_rvq (
     .clk                         (clk),
     .rst_n                       (rst_n),
@@ -310,17 +358,18 @@ rvq_core u_rvq (
     .codebook_wr_data            (rvq_codebook_wr_data),
     .latent_valid                (rvq_latent_valid),
     .latent_ready                (rvq_latent_ready),
-    .latent_data                 (latent_word),
+    .latent_data                 (projection_out_data),
     .latent_last                 (rvq_latent_last),
     .result_valid                (rvq_result_valid),
     .result_ready                (encoded_ready && (state == C_RVQ_WAIT)),
     .result_indices              (rvq_result_indices),
-    .residual_debug_group        (3'd0),
+    .residual_debug_group        (2'd0),
     .residual_debug_data         (),
     .busy                        (rvq_busy),
     .error                       (rvq_error)
 );
 
+// 时序逻辑：在时钟沿更新state、latent_group、latent_word、rvq_configured、frame_done、error；复位分支负责恢复确定的空闲状态。
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         state          <= C_IDLE;
@@ -333,7 +382,7 @@ always @(posedge clk or negedge rst_n) begin
         frame_done <= 1'b0;
         if (rvq_config_done && (state == C_IDLE))
             rvq_configured <= 1'b1;
-        if (encoder_error || rvq_error) begin
+        if (encoder_error || projection_error || rvq_error) begin
             error <= 1'b1;
             state <= C_ERROR;
         end else begin
@@ -375,7 +424,7 @@ always @(posedge clk or negedge rst_n) begin
                     state <= C_RVQ_SEND;
                 end
                 C_RVQ_SEND: begin
-                    if (rvq_latent_valid && rvq_latent_ready) begin
+                    if (projection_in_valid && projection_in_ready) begin
                         if (latent_group == 3'd7) begin
                             state <= C_RVQ_WAIT;
                         end else begin

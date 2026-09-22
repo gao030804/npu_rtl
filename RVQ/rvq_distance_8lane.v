@@ -20,6 +20,12 @@
 // - 每拍计算8维(residual-codebook)^2之和；差值先扩展到INT17，再平方并累加。
 // - rvq_core把8个dimension-group的结果累计成一个64维码字的UINT32距离。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：RVQ八维距离计算。
+// 关键变量/接口：计算8路(residual-codeword)^2并求和；核心再累加8个group得到64维UINT32距离。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module rvq_distance_8lane (
     input              [127:0]                  residual_data,
     input              [127:0]                  codeword_data,
@@ -35,6 +41,7 @@ reg        [33:0] square_value;
 
 // 纯组合距离单元：输入变化后重新计算8维部分距离，不保存跨拍状态。
 // 64维完整距离由rvq_core在8个dimension group之间继续累加。
+// 组合逻辑：根据当前输入计算group_distance、residual_ext、codeword_ext、difference、square_signed、square_value；本逻辑块不保存跨周期状态。
 always @(*) begin
     group_distance = 35'd0;
     residual_ext = 17'sd0;

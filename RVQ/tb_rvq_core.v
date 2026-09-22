@@ -3,12 +3,12 @@
 //=============================================================================
 // RVQ Core自检Testbench
 //
-// 测试向量：64维latent全部为40。
+// 测试向量：32维latent全部为40，验证9级非均匀码本与64-bit紧凑打包。
 //   stage0：选中index=3，码字=5，Residual 40 -> 35
 //   stage1：选中index=4，码字=10，Residual 35 -> 25
 //   stage2：选中index=5，码字=5，mult=2，Residual 25 -> 15
 //   stage3：选中index=6，码字=3，mult=5，Residual 15 -> 0
-//   stage4~7：分别选中index=7~10，码字=0，Residual保持0
+//   stage4~8：分别选中index=7~11，码字=0，Residual保持0
 //
 // 其他码字被设置成远离Residual的数值，从而保证最优index唯一。
 //=============================================================================
@@ -18,7 +18,7 @@ reg         clk;
 reg         rst_n;
 reg         scale_cfg_valid;
 wire        scale_cfg_ready;
-reg  [2:0]  scale_cfg_stage;
+reg  [3:0]  scale_cfg_stage;
 reg  [31:0] scale_cfg_multiplier;
 reg  [5:0]  scale_cfg_shift;
 reg         codebook_wr_valid;
@@ -32,7 +32,7 @@ reg         latent_last;
 wire        result_valid;
 reg         result_ready;
 wire [63:0] result_indices;
-reg  [2:0]  residual_debug_group;
+reg  [1:0]  residual_debug_group;
 wire [127:0] residual_debug_data;
 wire        busy;
 wire        error;
@@ -108,7 +108,7 @@ function [7:0] other_code_value;
 endfunction
 
 task configure_scale;
-    input [2:0]  cfg_stage;
+    input [3:0]  cfg_stage;
     input [31:0] cfg_multiplier;
     input [5:0]  cfg_shift;
     begin
@@ -129,10 +129,13 @@ task load_full_codebook;
             @(negedge clk);
 
         codebook_wr_valid = 1'b1;
-        for (addr = 0; addr < 16384; addr = addr + 1) begin
-            stage_i = (addr >> 11) & 7;
-            entry_i = (addr >> 3) & 255;
-            group_i = addr & 7;
+        for (addr = 0; addr < 5120; addr = addr + 1) begin
+            if (addr < 1024) begin
+                stage_i = 0; entry_i = addr >> 2; group_i = addr & 3;
+            end else begin
+                stage_i = 1 + ((addr - 1024) >> 9);
+                entry_i = ((addr - 1024) & 511) >> 2; group_i = addr & 3;
+            end
 
             if (entry_i == (stage_i + 3))
                 code_value = target_code_value(stage_i);
@@ -148,7 +151,7 @@ task load_full_codebook;
         codebook_wr_data  = 64'd0;
 
         $display(
-            "[TRACE] codebook loaded: 16384 x 64-bit = 128 KiB, cycle=%0d",
+            "[TRACE] codebook loaded: 5120 x 64-bit = 40 KiB, cycle=%0d",
             cycle_count
         );
     end
@@ -159,25 +162,25 @@ task send_latent_frame;
         latent_data = 64'h2828_2828_2828_2828;
         latent_valid = 1'b1;
 
-        for (group_i = 0; group_i < 8; group_i = group_i + 1) begin
+        for (group_i = 0; group_i < 4; group_i = group_i + 1) begin
             while (!latent_ready)
                 @(negedge clk);
-            latent_last = (group_i == 7);
+            latent_last = (group_i == 3);
             @(negedge clk);
         end
 
         latent_valid = 1'b0;
         latent_last  = 1'b0;
         search_start_cycle = cycle_count;
-        $display("[TRACE] 64-dimension latent accepted, search_start_cycle=%0d",
+        $display("[TRACE] 32-dimension latent accepted, search_start_cycle=%0d",
                  search_start_cycle);
     end
 endtask
 
 task check_final_residual;
     begin
-        for (group_i = 0; group_i < 8; group_i = group_i + 1) begin
-            residual_debug_group = group_i[2:0];
+        for (group_i = 0; group_i < 4; group_i = group_i + 1) begin
+            residual_debug_group = group_i[1:0];
             #1;
             if (residual_debug_data !== 128'd0) begin
                 error_count = error_count + 1;
@@ -196,7 +199,7 @@ initial begin
     clk                  = 1'b0;
     rst_n                = 1'b0;
     scale_cfg_valid      = 1'b0;
-    scale_cfg_stage      = 3'd0;
+    scale_cfg_stage      = 4'd0;
     scale_cfg_multiplier = 32'd0;
     scale_cfg_shift      = 6'd0;
     codebook_wr_valid    = 1'b0;
@@ -206,12 +209,12 @@ initial begin
     latent_data          = 64'd0;
     latent_last          = 1'b0;
     result_ready         = 1'b0;
-    residual_debug_group = 3'd0;
+    residual_debug_group = 2'd0;
     cycle_count          = 0;
     search_start_cycle   = 0;
     search_done_cycle    = 0;
     error_count          = 0;
-    expected_indices     = 64'h0a09_0807_0605_0403;
+    expected_indices     = 64'h1628_4880_e182_8403;
     held_indices         = 64'd0;
 
     repeat (5) @(posedge clk);
@@ -219,13 +222,13 @@ initial begin
     rst_n = 1'b1;
 
     // stage2/3刻意使用非1倍Scale，验证码本Scale对齐通路。
-    for (stage_i = 0; stage_i < 8; stage_i = stage_i + 1) begin
+    for (stage_i = 0; stage_i < 9; stage_i = stage_i + 1) begin
         if (stage_i == 2)
-            configure_scale(stage_i[2:0],32'd2,6'd0);
+            configure_scale(stage_i[3:0],32'd2,6'd0);
         else if (stage_i == 3)
-            configure_scale(stage_i[2:0],32'd5,6'd0);
+            configure_scale(stage_i[3:0],32'd5,6'd0);
         else
-            configure_scale(stage_i[2:0],32'd1,6'd0);
+            configure_scale(stage_i[3:0],32'd1,6'd0);
     end
 
     load_full_codebook;
@@ -286,7 +289,7 @@ initial begin
     end
 
     if (error_count == 0)
-        $display("[TB_PASS] 8-stage/256-entry RVQ, INT16 residual and UINT8 indices correct");
+        $display("[TB_PASS] 9-stage K256+8xK128, 32D RVQ and 64-bit packed indices correct");
     else
         $display("[TB_FAIL] rvq_core errors=%0d",error_count);
 

@@ -22,6 +22,12 @@
 // - 对8个INT8码本值分别执行multiplier/shift定点缩放，使其与当前Residual Scale一致。
 // - 使用64-bit乘法与对称舍入，输出INT16中间值，避免缩放后立即压回INT8造成额外误差。
 // -------------------------------------------------------------------------
+// [中文注释-自动补充]
+// 模块作用：RVQ码字Scale对齐。
+// 关键变量/接口：对8个INT8码字执行共享Multiplier/Shift并输出8个INT16值，与Residual标度对齐。
+// 握手约定：valid与ready在同一上升沿同时为1才完成一次传输；反压期间数据必须保持。
+// 位宽约定：地址通常按Byte计，Weight块为256 bit，Activation/Weight基本元素为signed INT8。
+// -----------------------------------------------------------------------------
 module rvq_scale_align_8lane (
     input              [63:0]                   codebook_data,
     input              [31:0]                   multiplier,
@@ -35,6 +41,7 @@ reg [16:0] lane_result;
 
 // 返回值[16]为饱和标志，[15:0]为signed INT16结果。
 
+// 辅助过程align_one：封装重复计算或测试激励，便于独立检查输入、输出及边界条件。
 function [16:0] align_one;
     input              [7:0]                    code_value;
     input              [31:0]                   mult_value;
@@ -78,6 +85,7 @@ function [16:0] align_one;
     end
 endfunction
 
+// 组合逻辑：根据当前输入计算aligned_data、overflow、lane_result、lane；本逻辑块不保存跨周期状态。
 always @(*) begin
     aligned_data = 128'd0;
     overflow = 1'b0;
